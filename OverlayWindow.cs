@@ -2241,11 +2241,13 @@ internal sealed class IslandRenderer : IDisposable
 
             canvas.DrawPath(glyph.Path, _idlePaint);
 
+            // Shaders carry their own opacity; reused paints must not multiply it again.
             var wideAlpha = ClampAlpha(42f * opacity * highlightEmphasis * entryRamp * glowScale);
             if (wideAlpha > 0)
             {
                 using var wideShader = CreateSmoothSweepShader(
                     trail, lead, new SKColor(255, 255, 255, wideAlpha), new SKColor(255, 255, 255, 0));
+                _wideGlow.Color = SKColors.White;
                 _wideGlow.Shader = wideShader;
                 canvas.DrawPath(glyph.Path, _wideGlow);
                 _wideGlow.Shader = null;
@@ -2256,6 +2258,7 @@ internal sealed class IslandRenderer : IDisposable
             {
                 using var tightShader = CreateSmoothSweepShader(
                     trail, lead, new SKColor(255, 255, 255, tightAlpha), new SKColor(255, 255, 255, 0));
+                _tightGlow.Color = SKColors.White;
                 _tightGlow.Shader = tightShader;
                 canvas.DrawPath(glyph.Path, _tightGlow);
                 _tightGlow.Shader = null;
@@ -2265,6 +2268,7 @@ internal sealed class IslandRenderer : IDisposable
             if (coreEntryColor.Alpha > 0)
             {
                 using var coreShader = CreateSmoothSweepShader(trail, coreLead, coreEntryColor, coreEntryColor.WithAlpha(0));
+                _corePaint.Color = SKColors.White;
                 _corePaint.Shader = coreShader;
                 canvas.DrawPath(glyph.Path, _corePaint);
                 _corePaint.Shader = null;
@@ -2274,6 +2278,7 @@ internal sealed class IslandRenderer : IDisposable
             if (bloomAlpha > 0)
             {
                 using var bloomShader = CreateBloomBellShader(trail - 4f, lead + 2f, bloomAlpha);
+                _edgeBloom.Color = SKColors.White;
                 _edgeBloom.Shader = bloomShader;
                 canvas.DrawPath(glyph.Path, _edgeBloom);
                 _edgeBloom.Shader = null;
