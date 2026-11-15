@@ -2,12 +2,6 @@
 
 **原项目由 AI 编写，由大肥鱼完成 Windows/macOS 平台适配**
 
-## 适配理由
-
-<img src="docs/images/windows-adaptation-reason.png" width="480" alt="有人询问 Windows 版并建议用 AI 移植的聊天截图">
-
-https://github.com/user-attachments/assets/bc65054e-03d4-4007-9032-1123cf56aa45
-
 Windows / macOS / Linux 桌面歌词岛。当前曲目和播放进度可来自 Spotify Web API 或本机播放器
 （Windows 使用系统媒体会话 SMTC，macOS 使用 Spotify / Music 的脚本接口，Linux 使用 MPRIS）；逐字歌词与翻译通过
 [Lyricify Lyrics Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) 获取和解析。
