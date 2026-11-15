@@ -1,12 +1,11 @@
 # Kashishu
 
-**原项目由 AI 编写，由大肥鱼完成 Windows 适配**
+**原项目由 AI 编写，由大肥鱼完成 Windows/macOS 平台适配**
 
-Windows / Linux 桌面歌词岛。当前曲目和播放进度可来自 Spotify Web API 或本机播放器
-（Windows 使用系统媒体会话 SMTC，Linux 使用 MPRIS）；逐字歌词与翻译通过
+Windows / macOS / Linux 桌面歌词岛。当前曲目和播放进度可来自 Spotify Web API 或本机播放器
+（Windows 使用系统媒体会话 SMTC，macOS 使用 Spotify / Music 的脚本接口，Linux 使用 MPRIS）；逐字歌词与翻译通过
 [Lyricify Lyrics Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) 获取和解析。
 字体、逐字裁剪、双层微光、播放头 bloom 与换行动画都在 Skia 自绘层完成，正常桌面运行时由 GPU 渲染。
-macOS 版通过 Spotify / Music 的脚本接口读取当前曲目，歌词与渲染逻辑与 Linux 版一致。
 
 ![Kashishu 歌词窗口：封面、播放控件、滚动歌词与翻译](docs/images/lyrics-window.png)
 
