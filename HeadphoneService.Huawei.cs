@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed partial class HeadphoneService
 {

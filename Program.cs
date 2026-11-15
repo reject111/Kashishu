@@ -11,7 +11,7 @@ using Avalonia.Threading;
 using SkiaSharp;
 using Tmds.DBus.Protocol;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed record LaunchOptions(bool Demo, string? SnapshotPath, double? ExitAfterSeconds)
 {
@@ -127,7 +127,7 @@ public sealed class App : Application
         var theme = new FluentTheme();
         theme.Palettes[ThemeVariant.Dark] = new ColorPaletteResources
         {
-            Accent = Avalonia.Media.Color.Parse("#1DB954")
+            Accent = LyricsTheme.Accent.Color
         };
         Styles.Add(theme);
     }
@@ -330,13 +330,13 @@ public sealed class App : Application
         menu.Add(exit);
 
         using var iconStream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream("LyricifyIsland.icon.png")
+            .GetManifestResourceStream("Kashishu.icon.png")
             ?? throw new InvalidOperationException("Embedded tray icon is missing");
         _appIcon = new WindowIcon(iconStream);
         _trayIcon = new TrayIcon
         {
             Icon = _appIcon,
-            ToolTipText = "Lyricify Island",
+            ToolTipText = "Kashishu",
             Menu = menu,
             IsVisible = true
         };
@@ -716,6 +716,44 @@ internal static class SelfCheck
                 && IslandRenderer.HighlightAgeProgress(650.5) > IslandRenderer.HighlightAgeProgress(650)
                 && IslandRenderer.HighlightAgeProgress(2_000) > 0.95f,
             "post-highlight lift timing");
+        Require(LyricsWindowRenderer.GlyphLiftProgress(1_000, 1_000, 1_400, 400, LyricsLiftMode.Stay) == 0d
+                && LyricsWindowRenderer.GlyphLiftProgress(1_200, 1_000, 1_400, 400, LyricsLiftMode.Stay)
+                    > LyricsWindowRenderer.GlyphLiftProgress(1_100, 1_000, 1_400, 400, LyricsLiftMode.Stay)
+                && LyricsWindowRenderer.GlyphLiftProgress(1_400, 1_000, 1_400, 400, LyricsLiftMode.Stay)
+                    > LyricsWindowRenderer.GlyphLiftProgress(1_200, 1_000, 1_400, 400, LyricsLiftMode.Stay)
+                && LyricsWindowRenderer.GlyphLiftProgress(2_500, 1_000, 1_400, 400, LyricsLiftMode.Stay) > 0.9f
+                && LyricsWindowRenderer.GlyphLiftProgress(1_000, 1_000, 1_400, 400, LyricsLiftMode.Wave) == 0d
+                && LyricsWindowRenderer.GlyphLiftProgress(1_100, 1_000, 1_400, 400, LyricsLiftMode.Wave) > 0d
+                && LyricsWindowRenderer.GlyphLiftProgress(1_200, 1_000, 1_400, 400, LyricsLiftMode.Wave)
+                    > LyricsWindowRenderer.GlyphLiftProgress(1_100, 1_000, 1_400, 400, LyricsLiftMode.Wave)
+                && LyricsWindowRenderer.GlyphLiftProgress(1_300, 1_000, 1_400, 400, LyricsLiftMode.Wave)
+                    > LyricsWindowRenderer.GlyphLiftProgress(1_200, 1_000, 1_400, 400, LyricsLiftMode.Wave)
+                && Math.Abs(LyricsWindowRenderer.GlyphLiftProgress(1_400, 1_000, 1_400, 400, LyricsLiftMode.Wave) - 1d) < 1e-6
+                && Math.Abs(LyricsWindowRenderer.GlyphLiftProgress(1_500, 1_000, 1_400, 400, LyricsLiftMode.Wave) - 1d) < 1e-6
+                && LyricsWindowRenderer.GlyphLiftProgress(1_700, 1_000, 1_400, 400, LyricsLiftMode.Wave) is > 0d and < 1d
+                && LyricsWindowRenderer.GlyphLiftProgress(2_400, 1_000, 1_400, 400, LyricsLiftMode.Wave) == 0d
+                && IslandRenderer.GlyphLiftProgress(1_350, 1_000, 1_400, 400, LyricsLiftMode.Wave)
+                    > IslandRenderer.GlyphLiftProgress(1_200, 1_000, 1_400, 400, LyricsLiftMode.Wave),
+            "continuous highlight lift in both Stay and Wave modes");
+        var earlyHighlight = LyricsWindowRenderer.GlyphHighlightState(0.01, 20f, 0f, 80f, 0.02);
+        var unreachedHighlight = LyricsWindowRenderer.GlyphHighlightState(0.05, 20f, 40f, 80f, 0.08);
+        var midWordHighlight = LyricsWindowRenderer.GlyphHighlightState(0.55, 20f, 40f, 80f, 0.7);
+        var completedHighlight = LyricsWindowRenderer.GlyphHighlightState(1.0, 20f, 60f, 80f, 1.0);
+        Require(earlyHighlight.EntryFactor is > 0f and < 0.1f
+                && earlyHighlight.GlowFactor < 0.01f
+                && unreachedHighlight.Lead <= 0f
+                && unreachedHighlight.GlowFactor == 0f
+                && Math.Abs(midWordHighlight.EntryFactor - 1f) < 1e-5f
+                && completedHighlight.Trail >= 20f
+                && Math.Abs(completedHighlight.EntryFactor - 1f) < 1e-5f,
+            "smooth highlight onset without premature word brightening or mid-word reset");
+        LyricsTheme.ApplyCover(null);
+        var defaultAccent = LyricsTheme.CoverAccent(LyricsTheme.DefaultColorA, LyricsTheme.DefaultColorB);
+        Require(LyricsTheme.Accent.Color.R == defaultAccent.Red
+                && LyricsTheme.Accent.Color.G == defaultAccent.Green
+                && LyricsTheme.Accent.Color.B == defaultAccent.Blue
+                && (LyricsTheme.Accent.Color.R != 137 || LyricsTheme.Accent.Color.G != 212 || LyricsTheme.Accent.Color.B != 162),
+            "background-derived default theme accent");
         var reportedAt = Stopwatch.GetTimestamp();
         var previousPlayback = new PlaybackSnapshot(
             track, 10_000, reportedAt - Stopwatch.Frequency, true, "test");
@@ -839,6 +877,7 @@ internal static class SelfCheck
             }
         }
         CheckEnglishWordEffects(track, hitTestRenderer);
+        CheckIslandSizeTransitions(track, hitTestRenderer);
         var inputRows = NativeOverlay.CapsuleRows(new PixelRect(10, 20, 100, 40));
         Require(inputRows.Length == 40
                 && inputRows[0].X > 10
@@ -847,6 +886,72 @@ internal static class SelfCheck
 
         Console.WriteLine("self-test: ok");
         return 0;
+    }
+
+    private static void CheckIslandSizeTransitions(TrackInfo track, IslandRenderer islandRenderer)
+    {
+        var statusFrame = new IslandFrame(track, null, null, 0, true, null, 99d, 1d);
+        var (_, statusWidth, statusHeight) = islandRenderer.CalculatePillLayout(960, 116, statusFrame);
+        var lyricLine = track.Lyrics[1];
+        var settledLyricFrame = new IslandFrame(track, lyricLine, null, 1_500, true, null, 99d, 1d);
+        var (_, lyricWidth, lyricHeight) = islandRenderer.CalculatePillLayout(960, 116, settledLyricFrame);
+        Require(lyricWidth > statusWidth, "sample lyric should be wider than track info");
+
+        var contracted = islandRenderer.CalculatePillBounds(960, 116, settledLyricFrame with
+        {
+            TransitionSeconds = 0.11d,
+            OutgoingFrame = statusFrame,
+            FromWidth = statusWidth,
+            FromHeight = statusHeight,
+            SizeTransitionSeconds = 0.11d
+        });
+        var rebounded = islandRenderer.CalculatePillBounds(960, 116, settledLyricFrame with
+        {
+            TransitionSeconds = 0.26d,
+            OutgoingFrame = statusFrame,
+            FromWidth = statusWidth,
+            FromHeight = statusHeight,
+            SizeTransitionSeconds = 0.26d
+        });
+        Require(contracted.Width < statusWidth && rebounded.Width > contracted.Width,
+            "status-to-lyric transition animates capsule length");
+
+        var trackSwitchFrame = settledLyricFrame with
+        {
+            TrackSwitch = new IslandTrackSwitch(statusFrame, 1, 0.11d, false, false, 1d),
+            FromWidth = statusWidth,
+            FromHeight = statusHeight,
+            SizeTransitionSeconds = 0.11d
+        };
+        var switchContracted = islandRenderer.CalculatePillBounds(960, 116, trackSwitchFrame);
+        Require(switchContracted.Width < statusWidth,
+            "track switch animates capsule contraction before expanding");
+
+        using var surface = SKSurface.Create(new SKImageInfo(960, 116, SKColorType.Rgba8888, SKAlphaType.Premul));
+        foreach (var t in new[] { 0.05d, 0.20d, 0.45d })
+        {
+            islandRenderer.Draw(surface.Canvas, 960, 116, settledLyricFrame with
+            {
+                TransitionSeconds = t,
+                OutgoingFrame = statusFrame,
+                FromWidth = statusWidth,
+                FromHeight = statusHeight,
+                SizeTransitionSeconds = t
+            });
+            islandRenderer.Draw(surface.Canvas, 960, 116, statusFrame with
+            {
+                TransitionSeconds = t,
+                OutgoingFrame = settledLyricFrame,
+                FromWidth = lyricWidth,
+                FromHeight = lyricHeight,
+                SizeTransitionSeconds = t
+            });
+        }
+        islandRenderer.Draw(surface.Canvas, 960, 116, trackSwitchFrame with
+        {
+            TrackSwitch = new IslandTrackSwitch(statusFrame, 1, 0.25d, false, false, 1d),
+            SizeTransitionSeconds = 0.25d
+        });
     }
 
     private static void CheckEnglishWordEffects(TrackInfo track, IslandRenderer islandRenderer)
@@ -896,6 +1001,57 @@ internal static class SelfCheck
                 && islandWordTimings[0].EndMs == islandWordTimings[2].EndMs
                 && islandWordTimings[^2].StartMs != islandWordTimings[^1].StartMs,
             "island whole-word English timings with per-character CJK preserved");
+
+        var firstChar = charLayout.Glyphs[0];
+        var secondChar = charLayout.Glyphs[1];
+        var preSecondPos = firstChar.StartMs + (firstChar.EndMs - firstChar.StartMs) * 0.75;
+        var bleedSweep = LyricsWindowRenderer.LineHighlightSweep(charLayout, preSecondPos);
+        Require(preSecondPos < secondChar.StartMs && bleedSweep.Lead > secondChar.LineX,
+            "preceding character glow bleeds into subsequent character before its StartMs");
+
+        Require(IslandRenderer.GlowIntensityScale(1) > 0f
+                && IslandRenderer.GlowIntensityScale(2) > IslandRenderer.GlowIntensityScale(1)
+                && IslandRenderer.GlowIntensityScale(3) > IslandRenderer.GlowIntensityScale(2)
+                && IslandRenderer.GlowIntensityScale(4) == 1f
+                && IslandRenderer.GlowIntensityScale(5) > IslandRenderer.GlowIntensityScale(4)
+                && IslandRenderer.GlowIntensityScale(0) == IslandRenderer.GlowIntensityScale(1)
+                && IslandRenderer.GlowIntensityScale(9) == IslandRenderer.GlowIntensityScale(5),
+            "5-level island glow intensity scaling with level 4 as default 1.0x");
+
+        using var islandSurface = SKSurface.Create(new SKImageInfo(960, 116, SKColorType.Rgba8888, SKAlphaType.Premul));
+        using var windowSurface = SKSurface.Create(new SKImageInfo(960, 640, SKColorType.Rgba8888, SKAlphaType.Premul));
+        using var windowRenderer = new LyricsWindowRenderer();
+        var snapshot = new PlaybackSnapshot(track, mixedLine.StartMs, Stopwatch.GetTimestamp(), true, "test");
+        foreach (var liftEnabled in new[] { true, false })
+        {
+            foreach (var liftMode in Enum.GetValues<LyricsLiftMode>())
+            {
+                foreach (var offsetMs in new[] { 5d, 130d, 260d, 350d })
+                {
+                    var pos = mixedLine.StartMs + offsetMs;
+                    for (var glowLevel = SettingsStore.MinimumIslandGlowIntensity;
+                        glowLevel <= SettingsStore.MaximumIslandGlowIntensity;
+                        glowLevel++)
+                    {
+                        islandRenderer.Draw(islandSurface.Canvas, 960, 116,
+                            new IslandFrame(track, mixedLine, null, pos, true, null, 99d, 1d, EnglishWordEffects: true)
+                            {
+                                LyricsLift = liftEnabled,
+                                LyricsLiftMode = liftMode,
+                                GlowIntensity = glowLevel
+                            });
+                    }
+                    windowRenderer.Draw(windowSurface.Canvas, 960, 640,
+                        new LyricsWindowFrame(snapshot, pos, pos, offsetMs / 1_000d, true, false, false, false, false,
+                            null, null, null, new Point(-1, -1), false)
+                        {
+                            EnglishWordEffects = true,
+                            LyricsLift = liftEnabled,
+                            LyricsLiftMode = liftMode
+                        });
+                }
+            }
+        }
     }
 
     private static void CheckHeadphones()
@@ -927,22 +1083,36 @@ internal static class SelfCheck
     private static void CheckSettingsStore()
     {
         var previousConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        var configHome = Path.Combine(Path.GetTempPath(), $"lyricify-island-self-test-{Guid.NewGuid():N}");
+        var configHome = Path.Combine(Path.GetTempPath(), $"kashishu-self-test-{Guid.NewGuid():N}");
         try
         {
             Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", configHome);
             var defaults = SettingsStore.Load();
             Require(defaults.LeftIconAction == IslandIconAction.LyricsWindow
-                    && defaults.RightIconAction == IslandIconAction.Favorite,
-                "default side icon actions");
+                    && defaults.RightIconAction == IslandIconAction.Favorite
+                    && defaults.IslandLyricsLift
+                    && defaults.WindowLyricsLift
+                    && defaults.IslandLyricsLiftMode == LyricsLiftMode.Stay
+                    && defaults.WindowLyricsLiftMode == LyricsLiftMode.Stay
+                    && defaults.IslandGlowIntensity == SettingsStore.DefaultIslandGlowIntensity
+                    && defaults.IslandGlowIntensity == 4,
+                "default side icon actions, lyrics lift, and island glow intensity settings");
             var normalizedInvalid = SettingsStore.Normalize(defaults with
             {
                 LeftIconAction = (IslandIconAction)999,
-                RightIconAction = (IslandIconAction)(-1)
+                RightIconAction = (IslandIconAction)(-1),
+                IslandLyricsLiftMode = (LyricsLiftMode)999,
+                WindowLyricsLiftMode = (LyricsLiftMode)(-1),
+                IslandGlowIntensity = 99
             });
+            var normalizedLow = SettingsStore.Normalize(defaults with { IslandGlowIntensity = 0 });
             Require(normalizedInvalid.LeftIconAction == IslandIconAction.LyricsWindow
-                    && normalizedInvalid.RightIconAction == IslandIconAction.Favorite,
-                "invalid side icon action normalization");
+                    && normalizedInvalid.RightIconAction == IslandIconAction.Favorite
+                    && normalizedInvalid.IslandLyricsLiftMode == LyricsLiftMode.Stay
+                    && normalizedInvalid.WindowLyricsLiftMode == LyricsLiftMode.Stay
+                    && normalizedInvalid.IslandGlowIntensity == SettingsStore.MaximumIslandGlowIntensity
+                    && normalizedLow.IslandGlowIntensity == SettingsStore.MinimumIslandGlowIntensity,
+                "invalid side icon action, lift mode, and glow intensity normalization");
             var expected = new IslandSettings(
                 80d,
                 120d,
@@ -967,7 +1137,12 @@ internal static class SelfCheck
                 PlaybackSource = PlaybackSourcePreference.Mpris,
                 EnglishWordEffects = true,
                 LeftIconAction = IslandIconAction.PlayPause,
-                RightIconAction = IslandIconAction.Banner
+                RightIconAction = IslandIconAction.Banner,
+                IslandLyricsLift = false,
+                WindowLyricsLift = false,
+                IslandLyricsLiftMode = LyricsLiftMode.Wave,
+                WindowLyricsLiftMode = LyricsLiftMode.Wave,
+                IslandGlowIntensity = 2
             };
             expected = expected.WithTrackOffset("track-a", "测试歌曲 — 测试歌手", -275);
             expected = expected.WithTrackOffset("track-zero", "零偏移歌曲", 0);
@@ -983,7 +1158,7 @@ internal static class SelfCheck
                 "settings round trip");
             if (!OperatingSystem.IsWindows())
             {
-                var directory = Path.Combine(configHome, "lyricify-island");
+                var directory = Path.Combine(configHome, "kashishu");
                 Require(File.GetUnixFileMode(directory)
                         == (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute),
                     "settings directory permissions");
@@ -993,10 +1168,10 @@ internal static class SelfCheck
             }
             if (OperatingSystem.IsLinux())
             {
-                Require(Autostart.SetEnabled(true, "/tmp/Lyricify Island/$app"), "autostart enable");
-                var autostartPath = Path.Combine(configHome, "autostart", "lyricify-island.desktop");
+                Require(Autostart.SetEnabled(true, "/tmp/Kashishu/$app"), "autostart enable");
+                var autostartPath = Path.Combine(configHome, "autostart", "kashishu.desktop");
                 var desktopEntry = File.ReadAllText(autostartPath);
-                Require(desktopEntry.Contains("Exec=\"/tmp/Lyricify Island/\\$app\""),
+                Require(desktopEntry.Contains("Exec=\"/tmp/Kashishu/\\$app\""),
                     "autostart executable quoting");
                 Require(Autostart.SetEnabled(false) && !File.Exists(autostartPath), "autostart disable");
             }
@@ -1070,7 +1245,7 @@ internal static class SelfCheck
 
     private static void CheckFileArtwork()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"lyricify-island-art-{Guid.NewGuid():N}");
+        var path = Path.Combine(Path.GetTempPath(), $"kashishu-art-{Guid.NewGuid():N}");
         try
         {
             File.WriteAllBytes(path, [1, 2, 3]);
@@ -1097,7 +1272,7 @@ internal static class SelfCheck
         Require(serialized.Contains($"\"{Convert.ToBase64String([1, 2, 3])}\""), "base64 track cache serialization");
 
         var previousCacheHome = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
-        var cacheHome = Path.Combine(Path.GetTempPath(), $"lyricify-island-cache-test-{Guid.NewGuid():N}");
+        var cacheHome = Path.Combine(Path.GetTempPath(), $"kashishu-cache-test-{Guid.NewGuid():N}");
         try
         {
             Environment.SetEnvironmentVariable("XDG_CACHE_HOME", cacheHome);

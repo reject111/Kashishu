@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 // Huawei SPP: 5A 00, little-endian length (frame size minus five), service/command,
 // one-byte type/length TLVs, then big-endian CRC-16/XMODEM over the preceding bytes.

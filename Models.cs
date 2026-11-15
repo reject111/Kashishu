@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 public sealed record LyricSyllable(string Text, long StartMs, long EndMs);
 

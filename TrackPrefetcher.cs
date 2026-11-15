@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 // Shares the on-disk cache with foreground loading, without publishing playback state.
 internal sealed class TrackPrefetcher

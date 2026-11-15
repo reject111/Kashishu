@@ -20,7 +20,7 @@ license are included in `licenses/OppoPodsManager-GPL-3.0.txt`. Preserve these
 notices and provide the corresponding source data when redistributing them.
 
 The Linux connection service, packet handling, capability reader and Avalonia
-window in this repository are implemented for LyricifyIsland. Protocol behavior
+window in this repository are implemented for Kashishu. Protocol behavior
 was checked against the above desktop project and
 [Leaf-lsgtky/OppoPods](https://github.com/Leaf-lsgtky/OppoPods), commit
 `10a2f04de5911b59b2ed74404602ea46e8741324`. No Android/Xposed integration, upstream

@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SkiaSharp;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal static class TrackCache
 {
@@ -124,7 +124,7 @@ internal static class TrackCache
         if (string.IsNullOrWhiteSpace(cacheHome) || !Path.IsPathRooted(cacheHome))
             cacheHome = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache");
-        return Path.Combine(cacheHome, "lyricify-island", "tracks");
+        return Path.Combine(cacheHome, "kashishu", "tracks");
     }
 
     private sealed class ImmutableByteArrayJsonConverter : JsonConverter<ImmutableArray<byte>>

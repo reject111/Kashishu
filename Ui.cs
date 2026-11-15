@@ -6,7 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>Small widget kit shared by the settings and headphone windows.</summary>
 internal static class Ui

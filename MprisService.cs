@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Tmds.DBus.Protocol;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed class MprisService : IPlaybackSource
 {

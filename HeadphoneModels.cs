@@ -1,4 +1,4 @@
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal enum HeadphoneConnectionMethod { Automatic, Uuid, Channel15 }
 internal enum HeadphoneNoiseMode { Off, NoiseCancellation, Transparency, Adaptive }

@@ -6,7 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed class SettingsPage : PanelPage
 {
@@ -355,12 +355,66 @@ internal sealed class SettingsPage : PanelPage
             Children = { refreshStatus, refreshTrack }
         };
 
+        var liftModeChoices = new[]
+        {
+            (LyricsLiftMode.Stay, "升起保持"),
+            (LyricsLiftMode.Wave, "波浪回落")
+        };
+        var islandLiftMode = Pick("灵动岛歌词上下运动形式", liftModeChoices, settings.IslandLyricsLiftMode,
+            value => Commit(settings with { IslandLyricsLiftMode = value }));
+        islandLiftMode.IsEnabled = settings.IslandLyricsLift;
+        islandLiftMode.Opacity = settings.IslandLyricsLift ? 1d : 0.45d;
+        var islandLiftSwitch = Switch("灵动岛歌词上下运动", settings.IslandLyricsLift, value =>
+        {
+            if (Commit(settings with { IslandLyricsLift = value }))
+            {
+                islandLiftMode.IsEnabled = value;
+                islandLiftMode.Opacity = value ? 1d : 0.45d;
+            }
+        });
+        var islandLiftControls = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { islandLiftMode, islandLiftSwitch }
+        };
+
+        var windowLiftMode = Pick("主界面歌词上下运动形式", liftModeChoices, settings.WindowLyricsLiftMode,
+            value => Commit(settings with { WindowLyricsLiftMode = value }));
+        windowLiftMode.IsEnabled = settings.WindowLyricsLift;
+        windowLiftMode.Opacity = settings.WindowLyricsLift ? 1d : 0.45d;
+        var windowLiftSwitch = Switch("主界面歌词上下运动", settings.WindowLyricsLift, value =>
+        {
+            if (Commit(settings with { WindowLyricsLift = value }))
+            {
+                windowLiftMode.IsEnabled = value;
+                windowLiftMode.Opacity = value ? 1d : 0.45d;
+            }
+        });
+        var windowLiftControls = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { windowLiftMode, windowLiftSwitch }
+        };
+
         var lyricsSection = Ui.Section(
             "歌词",
             "控制歌词内容和时间同步",
             Ui.Row("显示翻译", "有翻译时在原文下方显示",
                 Switch("显示歌词翻译", settings.ShowTranslation,
                     value => Commit(settings with { ShowTranslation = value }))),
+            Ui.Row("灵动岛歌词上下运动", "可选择升起后保持在顶部连成平台，或完整升起后平滑回落",
+                islandLiftControls),
+            Ui.Row("主界面歌词上下运动", "可选择升起后保持在顶部连成平台，或完整升起后平滑回落",
+                windowLiftControls),
+            Ui.Row("灵动岛高光（泛光）强度", "调整岛屿歌词高亮时的泛光与光晕强度，默认为 4 档",
+                Pick("灵动岛高光泛光强度",
+                    [(1, "1 档"), (2, "2 档"), (3, "3 档"), (4, "4 档"), (5, "5 档")],
+                    settings.IslandGlowIntensity,
+                    value => Commit(settings with { IslandGlowIntensity = value }))),
             Ui.Row("英文整词特效", "开启后英文歌词按整个单词产生跳字与发光特效，而非逐个字母",
                 Switch("英文整词特效", settings.EnglishWordEffects,
                     value => Commit(settings with { EnglishWordEffects = value }))),

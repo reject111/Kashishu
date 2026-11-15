@@ -7,7 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed class SpotifyService : IPlaybackSource
 {
@@ -1133,7 +1133,7 @@ internal sealed class SpotifyService : IPlaybackSource
         CancellationToken cancellationToken)
     {
         var body = Encoding.UTF8.GetBytes(
-            $"<!doctype html><meta charset=utf-8><title>Lyricify Island</title><p>{WebUtility.HtmlEncode(message)}</p>");
+            $"<!doctype html><meta charset=utf-8><title>Kashishu</title><p>{WebUtility.HtmlEncode(message)}</p>");
         var header = Encoding.ASCII.GetBytes(
             $"HTTP/1.1 {code} {reason}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(header, cancellationToken);
@@ -1171,7 +1171,7 @@ internal sealed class SpotifyService : IPlaybackSource
         if (string.IsNullOrWhiteSpace(stateHome) || !Path.IsPathRooted(stateHome))
             stateHome = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "state");
-        return Path.Combine(stateHome, "lyricify-island", "spotify-token.json");
+        return Path.Combine(stateHome, "kashishu", "spotify-token.json");
     }
 
     private static void Secure(string path, UnixFileMode mode)

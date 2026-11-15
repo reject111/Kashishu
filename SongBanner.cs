@@ -5,7 +5,7 @@ using Avalonia.Media.TextFormatting;
 using QRCoder;
 using SkiaSharp;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal static class SongBanner
 {
@@ -99,7 +99,7 @@ internal static class SongBanner
         }
         var height = MeasureHeight(portrait, y, showBrand);
         if (showBrand)
-            Text(context, "Lyricify Island", x, height - Inset - (portrait ? 30 : 25),
+            Text(context, "Kashishu", x, height - Inset - (portrait ? 30 : 25),
                 300, portrait ? 24 : 20, "#C3BFB7");
         return height;
     }

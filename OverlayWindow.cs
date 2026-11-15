@@ -15,7 +15,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using SkiaSharp;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 public sealed class OverlayWindow : Window
 {
@@ -553,7 +553,17 @@ public sealed class IslandControl : Control, IDisposable
     private int _lineIndex = int.MinValue;
     private LyricLine? _line;
     private LyricLine? _outgoing;
+    private IslandFrame? _outgoingFrame;
     private long _transitionAt;
+    private bool _hasLayoutTarget;
+    private float _targetRefWidth;
+    private float _targetRefHeight;
+    private float _sizeFromWidth;
+    private float _sizeFromHeight;
+    private float _currentBaseWidth;
+    private float _currentBaseHeight;
+    private long _sizeTransitionAt;
+    private bool _sizeTransitioning;
     private double _capsuleProgress = 1d;
     private double _capsuleFrom = 1d;
     private bool _capsuleShown = true;
@@ -564,6 +574,9 @@ public sealed class IslandControl : Control, IDisposable
     private ImmutableDictionary<string, int>? _trackOffsetsMs;
     private bool _showTranslation = true;
     private bool _englishWordEffects;
+    private bool _lyricsLift = true;
+    private LyricsLiftMode _lyricsLiftMode = LyricsLiftMode.Stay;
+    private int _glowIntensity = SettingsStore.DefaultIslandGlowIntensity;
     private bool _showIsland = true;
     private PausedDisplayMode _pausedDisplay;
     private bool _inactive;
@@ -723,7 +736,8 @@ public sealed class IslandControl : Control, IDisposable
             return;
         _animationFrameQueued = true;
         var snapshot = _store.Snapshot;
-        if ((!_showIsland || !snapshot.IsPlaying) && _outgoing is null && !_capsuleTransitioning && !_sidesTransitioning
+        if ((!_showIsland || !snapshot.IsPlaying) && _outgoing is null && _outgoingFrame is null
+            && !_sizeTransitioning && !_capsuleTransitioning && !_sidesTransitioning
             && !_lyricsTransitioning && !_sideIconsTransitioning
             && !TrackSwitchInProgress
             && !_delayedHidePending && ReferenceEquals(snapshot, _renderedSnapshot))
@@ -745,7 +759,8 @@ public sealed class IslandControl : Control, IDisposable
             return;
 
         var snapshot = _store.Snapshot;
-        if ((_showIsland && snapshot.IsPlaying) || _outgoing is not null || _capsuleTransitioning || _sidesTransitioning
+        if ((_showIsland && snapshot.IsPlaying) || _outgoing is not null || _outgoingFrame is not null
+            || _sizeTransitioning || _capsuleTransitioning || _sidesTransitioning
             || _lyricsTransitioning || _sideIconsTransitioning || _delayedHidePending
             || TrackSwitchInProgress
             || !ReferenceEquals(snapshot, _renderedSnapshot))
@@ -760,6 +775,9 @@ public sealed class IslandControl : Control, IDisposable
         _trackOffsetsMs = settings.EnableTrackOffsets ? settings.TrackOffsetsMs : null;
         _showTranslation = settings.ShowTranslation;
         _englishWordEffects = settings.EnglishWordEffects;
+        _lyricsLift = settings.IslandLyricsLift;
+        _lyricsLiftMode = settings.IslandLyricsLiftMode;
+        _glowIntensity = SettingsStore.NormalizeIslandGlowIntensity(settings.IslandGlowIntensity);
         _leftIconAction = settings.LeftIconAction;
         _rightIconAction = settings.RightIconAction;
         _showIsland = settings.ShowIsland;
@@ -798,7 +816,13 @@ public sealed class IslandControl : Control, IDisposable
     {
         if (_renderedFrame is not { Track: not null } outgoing || outgoing.Track.Id != snapshot.Track!.Id)
             return;
-        _switchOutgoing = outgoing with { TrackSwitch = null, LeftIcon = default, RightIcon = default };
+        _switchOutgoing = outgoing with
+        {
+            TrackSwitch = null,
+            OutgoingFrame = null,
+            LeftIcon = default,
+            RightIcon = default
+        };
         _switchDirection = direction;
         _switchPositionMs = snapshot.ReportedPositionMs;
         _switchRequestedAt = Stopwatch.GetTimestamp();
@@ -856,49 +880,123 @@ public sealed class IslandControl : Control, IDisposable
             Math.Clamp(feedbackSeconds / .09d, 0d, 1d));
     }
 
+    private static bool HasSameDisplayedContent(
+        IslandFrame previous, TrackInfo? track, LyricLine? line, string? status)
+    {
+        if (!string.Equals(previous.Track?.Id, track?.Id, StringComparison.Ordinal))
+            return false;
+
+        if (previous.Line is not null || line is not null)
+        {
+            return previous.Line is not null && line is not null
+                && (ReferenceEquals(previous.Line, line)
+                    || (previous.Line.Text == line.Text
+                        && previous.Line.Translation == line.Translation
+                        && previous.Line.StartMs == line.StartMs));
+        }
+
+        return string.Equals(previous.Track?.Title, track?.Title, StringComparison.Ordinal)
+            && string.Equals(
+                IslandRenderer.StatusSubtitle(previous.Track, previous.Status),
+                IslandRenderer.StatusSubtitle(track, status),
+                StringComparison.Ordinal);
+    }
+
     public override void Render(DrawingContext context)
     {
         var snapshot = _store.Snapshot;
         _renderedSnapshot = snapshot;
         var position = CurrentPosition(snapshot);
         var track = snapshot.Track;
+        var now = Stopwatch.GetTimestamp();
+        var trackSwitch = TrackSwitchFrame(snapshot, now);
+        var requiresAttention = PlaybackStore.RequiresAttention(snapshot.Status);
+        var displayTrack = requiresAttention ? null : track;
+        var previousFrame = _renderedFrame;
 
-        if (!ReferenceEquals(track, _track))
+        if (!ReferenceEquals(displayTrack, _track))
         {
-            _track = track;
+            _track = displayTrack;
             _lineIndex = int.MinValue;
             _line = null;
-            _outgoing = null;
         }
 
-        var nextIndex = FindLine(track?.Lyrics, position);
+        var nextIndex = FindLine(displayTrack?.Lyrics, position);
         if (nextIndex != _lineIndex)
         {
-            var next = nextIndex >= 0 ? track!.Lyrics[nextIndex] : null;
-            if (_lineIndex != int.MinValue && _line is not null && next is not null)
+            _lineIndex = nextIndex;
+            _line = nextIndex >= 0 ? displayTrack!.Lyrics[nextIndex] : null;
+        }
+
+        var (refWidth, refHeight) = _renderer.MeasureReferencePillSize(
+            displayTrack, _line, snapshot.Status, _showTranslation, _englishWordEffects);
+        var contentChanged = previousFrame is not null
+            && !HasSameDisplayedContent(previousFrame, displayTrack, _line, snapshot.Status);
+        var refSizeChanged = _hasLayoutTarget
+            && (Math.Abs(refWidth - _targetRefWidth) > 0.5f || Math.Abs(refHeight - _targetRefHeight) > 0.5f);
+        var trackSwitchActive = trackSwitch is { Waiting: false, Returning: false };
+        var trackSwitchHolding = trackSwitch is { Waiting: true } or { Returning: true };
+
+        if (!trackSwitchHolding)
+        {
+            if (contentChanged)
             {
-                _outgoing = _line;
-                _transitionAt = Stopwatch.GetTimestamp();
-            }
-            else
-            {
-                _outgoing = null;
-                _transitionAt = 0;
+                if (trackSwitchActive)
+                {
+                    _outgoing = null;
+                    _outgoingFrame = null;
+                    _transitionAt = 0;
+                }
+                else
+                {
+                    _outgoing = previousFrame!.Line;
+                    _outgoingFrame = previousFrame with
+                    {
+                        Outgoing = null,
+                        OutgoingFrame = null,
+                        TrackSwitch = null,
+                        TransitionSeconds = 99d
+                    };
+                    _transitionAt = now;
+                }
             }
 
-            _lineIndex = nextIndex;
-            _line = next;
+            if (!_hasLayoutTarget)
+            {
+                if (Bounds.Width > 0d)
+                {
+                    _hasLayoutTarget = true;
+                    _targetRefWidth = refWidth;
+                    _targetRefHeight = refHeight;
+                }
+            }
+            else if (refSizeChanged || contentChanged)
+            {
+                _sizeFromWidth = _currentBaseWidth;
+                _sizeFromHeight = _currentBaseHeight;
+                _sizeTransitionAt = now;
+                _targetRefWidth = refWidth;
+                _targetRefHeight = refHeight;
+            }
         }
 
         var transitionSeconds = _transitionAt == 0
             ? 99d
-            : Stopwatch.GetElapsedTime(_transitionAt).TotalSeconds;
+            : Stopwatch.GetElapsedTime(_transitionAt, now).TotalSeconds;
         if (transitionSeconds > IslandRenderer.TransitionDuration)
+        {
             _outgoing = null;
+            _outgoingFrame = null;
+            _transitionAt = 0;
+        }
 
-        var now = Stopwatch.GetTimestamp();
-        var trackSwitch = TrackSwitchFrame(snapshot, now);
-        var requiresAttention = PlaybackStore.RequiresAttention(snapshot.Status);
+        var sizeSeconds = _sizeTransitionAt == 0
+            ? IslandRenderer.TransitionDuration
+            : Stopwatch.GetElapsedTime(_sizeTransitionAt, now).TotalSeconds;
+        _sizeTransitioning = _sizeTransitionAt != 0 && sizeSeconds < IslandRenderer.TransitionDuration;
+        if (!_sizeTransitioning)
+            _sizeTransitionAt = 0;
+
         if (_islandPauseTrackId is not null)
         {
             if (requiresAttention || track?.Id != _islandPauseTrackId || snapshot.IsPlaying && _islandPauseObserved)
@@ -962,7 +1060,7 @@ public sealed class IslandControl : Control, IDisposable
         _lyricsTransitioning = lyricsSeconds < IslandRenderer.CapsuleTransitionDuration;
 
         var baseFrame = new IslandFrame(
-            requiresAttention ? null : track,
+            displayTrack,
             requiresAttention ? null : _line,
             requiresAttention ? null : _outgoing,
             position,
@@ -975,8 +1073,23 @@ public sealed class IslandControl : Control, IDisposable
             _sidesProgress,
             _lyricsEmphasis,
             trackSwitch,
-            _englishWordEffects);
-        var fullPillBounds = _renderer.CalculatePillBounds((float)Bounds.Width, (float)Bounds.Height, baseFrame);
+            _englishWordEffects)
+        {
+            OutgoingFrame = requiresAttention ? null : _outgoingFrame,
+            FromWidth = _sizeTransitioning ? _sizeFromWidth : null,
+            FromHeight = _sizeTransitioning ? _sizeFromHeight : null,
+            SizeTransitionSeconds = _sizeTransitioning ? sizeSeconds : null,
+            LyricsLift = _lyricsLift,
+            LyricsLiftMode = _lyricsLiftMode,
+            GlowIntensity = _glowIntensity
+        };
+        var (fullPillBounds, baseWidth, baseHeight) = _renderer.CalculatePillLayout(
+            (float)Bounds.Width, (float)Bounds.Height, baseFrame);
+        if (Bounds.Width > 0d)
+        {
+            _currentBaseWidth = baseWidth;
+            _currentBaseHeight = baseHeight;
+        }
         var pillBounds = IslandRenderer.ScalePillBounds(fullPillBounds, _capsuleProgress);
         if (pillBounds != _pillBounds)
         {
@@ -1184,8 +1297,15 @@ internal sealed record IslandFrame(
     IslandTrackSwitch? TrackSwitch = null,
     bool EnglishWordEffects = false)
 {
+    public IslandFrame? OutgoingFrame { get; init; }
+    public float? FromWidth { get; init; }
+    public float? FromHeight { get; init; }
+    public double? SizeTransitionSeconds { get; init; }
     public IslandSideIconState LeftIcon { get; init; }
     public IslandSideIconState RightIcon { get; init; }
+    public bool LyricsLift { get; init; } = true;
+    public LyricsLiftMode LyricsLiftMode { get; init; } = LyricsLiftMode.Stay;
+    public int GlowIntensity { get; init; } = SettingsStore.DefaultIslandGlowIntensity;
     public double FavoriteHover
     {
         get => RightIcon.Hover;
@@ -1221,7 +1341,7 @@ internal sealed class IslandRenderer : IDisposable
 {
     public const double TransitionDuration = 0.9;
     public const double CapsuleTransitionDuration = 0.38d;
-    public const double TrackSwitchDuration = 0.28d;
+    public const double TrackSwitchDuration = 0.46d;
     public const double TrackReturnDuration = 0.18d;
     private const double ArtistAvatarDelay = 1.05d;
     private const double ArtistAvatarSlot = 3d;
@@ -1290,7 +1410,7 @@ internal sealed class IslandRenderer : IDisposable
         _cjkFont = CreateFont(_cjk, MainSize);
         _japaneseFont = CreateFont(_japanese, MainSize);
         _translationFont = CreateFont(_cjk, TranslationSize);
-        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("LyricifyIsland.icon.png");
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Kashishu.icon.png");
         if (stream is not null)
             _icon = SKBitmap.Decode(stream);
     }
@@ -1369,27 +1489,48 @@ internal sealed class IslandRenderer : IDisposable
         canvas.Scale(frame.TextScale);
         canvas.Translate(-clip.MidX, -clip.MidY);
 
-        if (frame.Outgoing is not null && frame.TransitionSeconds < 0.12)
+        var outgoingFrame = frame.OutgoingFrame
+            ?? (frame.Outgoing is null ? null : frame with { Line = frame.Outgoing, Outgoing = null, OutgoingFrame = null });
+        var hasOutgoing = outgoingFrame is not null;
+        if (outgoingFrame is not null && frame.TransitionSeconds < 0.12)
         {
             var p = Math.Clamp(frame.TransitionSeconds / 0.11, 0d, 1d);
-            DrawLineBlock(canvas, frame.Outgoing, frame.PositionMs, clip, mainFonts, _translationFont,
-                1f - 0.25f * (float)EaseOutCubic(p), (float)(1d - EaseOutCubic(p)), frame.ShowTranslation,
-                frame.HighlightEmphasis, frame.EnglishWordEffects);
+            var outScale = 1f - 0.25f * (float)EaseOutCubic(p);
+            var outOpacity = (float)(1d - EaseOutCubic(p));
+            if (outgoingFrame.Line is not null)
+            {
+                DrawLineBlock(canvas, outgoingFrame.Line, outgoingFrame.PositionMs, clip, mainFonts, _translationFont,
+                    outScale, outOpacity, outgoingFrame.ShowTranslation, outgoingFrame.HighlightEmphasis,
+                    outgoingFrame.EnglishWordEffects, outgoingFrame.LyricsLift, outgoingFrame.LyricsLiftMode,
+                    outgoingFrame.GlowIntensity);
+            }
+            else
+            {
+                DrawStatus(canvas, outgoingFrame, clip, mainFonts, _translationFont, outScale, outOpacity);
+            }
         }
 
-        var incomingStart = frame.Outgoing is null ? 0d : 0.30d;
-        if (frame.Line is not null && frame.TransitionSeconds >= incomingStart)
+        var incomingStart = hasOutgoing ? 0.30d : 0d;
+        if (frame.TransitionSeconds >= incomingStart)
         {
-            var p = frame.Outgoing is null
+            var p = !hasOutgoing
                 ? 1d
                 : Math.Clamp((frame.TransitionSeconds - incomingStart) / 0.60d, 0d, 1d);
-            var scale = frame.Outgoing is null ? 1f : (float)(0.75d + 0.25d * Spring(p));
-            DrawLineBlock(canvas, frame.Line, frame.PositionMs, clip, mainFonts, _translationFont,
-                scale, (float)EaseOutCubic(p), frame.ShowTranslation, frame.HighlightEmphasis, frame.EnglishWordEffects);
-        }
-        else if (frame.Line is null)
-        {
-            DrawStatus(canvas, frame, clip, mainFonts, _translationFont);
+            var scale = !hasOutgoing ? 1f : (float)(0.75d + 0.25d * Spring(p));
+            var opacity = !hasOutgoing ? 1f : (float)EaseOutCubic(p);
+            if (frame.Line is not null)
+            {
+                var incomingHighlight = !hasOutgoing
+                    ? 1f
+                    : (float)SmoothStep(Math.Clamp((frame.TransitionSeconds - incomingStart) / 0.35d, 0d, 1d));
+                DrawLineBlock(canvas, frame.Line, frame.PositionMs, clip, mainFonts, _translationFont,
+                    scale, opacity, frame.ShowTranslation, frame.HighlightEmphasis * incomingHighlight,
+                    frame.EnglishWordEffects, frame.LyricsLift, frame.LyricsLiftMode, frame.GlowIntensity);
+            }
+            else
+            {
+                DrawStatus(canvas, frame, clip, mainFonts, _translationFont, scale, opacity);
+            }
         }
 
         canvas.Restore();
@@ -1410,7 +1551,10 @@ internal sealed class IslandRenderer : IDisposable
             surface.Canvas.Scale(captureScale);
             var outgoingPill = PillRect(width, height, transition.Outgoing,
                 new MainFontSet(_latinFont, _cjkFont, _japaneseFont), _translationFont);
-            DrawContent(surface.Canvas, transition.Outgoing, outgoingPill);
+            DrawContent(
+                surface.Canvas,
+                transition.Outgoing with { Outgoing = null, OutgoingFrame = null, TransitionSeconds = 99d },
+                outgoingPill);
             _switchImage = surface.Snapshot();
             _switchImageFrame = transition.Outgoing;
         }
@@ -1438,35 +1582,66 @@ internal sealed class IslandRenderer : IDisposable
             new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), _switchPaint);
         if (!transition.Waiting && !transition.Returning)
         {
-            var progress = Math.Clamp(transition.Seconds / TrackSwitchDuration, 0d, 1d);
-            var eased = (float)EaseOutCubic(progress);
-            var incomingOffset = transition.Direction * 24f * (1f - eased);
-            var incomingScale = .94f + .06f * (float)Spring(progress);
-            _switchPaint.Color = SKColors.White.WithAlpha((byte)Math.Round(255f * eased));
-            canvas.SaveLayer(_switchPaint);
-            canvas.Translate(pill.MidX, pill.MidY + incomingOffset);
-            canvas.Scale(incomingScale);
-            canvas.Translate(-pill.MidX, -pill.MidY);
-            DrawContent(canvas, frame with { Outgoing = null, TransitionSeconds = 99d, TrackSwitch = null }, pill);
-            canvas.Restore();
+            const double incomingDelay = 0.18d;
+            if (transition.Seconds >= incomingDelay)
+            {
+                var progress = Math.Clamp(
+                    (transition.Seconds - incomingDelay) / (TrackSwitchDuration - incomingDelay), 0d, 1d);
+                var eased = (float)EaseOutCubic(progress);
+                var incomingOffset = transition.Direction * 24f * (1f - eased);
+                var incomingScale = .94f + .06f * (float)Spring(progress);
+                _switchPaint.Color = SKColors.White.WithAlpha((byte)Math.Round(255f * eased));
+                canvas.SaveLayer(_switchPaint);
+                canvas.Translate(pill.MidX, pill.MidY + incomingOffset);
+                canvas.Scale(incomingScale);
+                canvas.Translate(-pill.MidX, -pill.MidY);
+                DrawContent(
+                    canvas,
+                    frame with { Outgoing = null, OutgoingFrame = null, TransitionSeconds = 99d, TrackSwitch = null },
+                    pill);
+                canvas.Restore();
+            }
         }
         canvas.Restore();
     }
 
-    internal Rect CalculatePillBounds(float width, float height, IslandFrame frame)
+    internal (float Width, float Height) MeasureReferencePillSize(
+        TrackInfo? track,
+        LyricLine? line,
+        string? status,
+        bool showTranslation,
+        bool englishWordEffects)
+    {
+        var mainFonts = new MainFontSet(_latinFont, _cjkFont, _japaneseFont);
+        var width = DesiredWidth(
+            track, line, status, mainFonts, _translationFont, showTranslation, 1f, englishWordEffects);
+        var height = DesiredPillHeight(line, showTranslation);
+        return (width, height);
+    }
+
+    internal Rect CalculatePillBounds(float width, float height, IslandFrame frame) =>
+        CalculatePillLayout(width, height, frame).PillBounds;
+
+    internal (Rect PillBounds, float BaseWidth, float BaseHeight) CalculatePillLayout(
+        float width, float height, IslandFrame frame)
     {
         var visualScale = (float)Math.Clamp(frame.Scale, 0.5d, 2d);
-        var pill = PillRect(
-            width / visualScale,
-            height / visualScale,
-            frame,
-            new MainFontSet(_latinFont, _cjkFont, _japaneseFont),
-            _translationFont);
-        return new Rect(
-            pill.Left * visualScale,
-            pill.Top * visualScale,
-            pill.Width * visualScale,
-            pill.Height * visualScale);
+        var scaledWidth = width / visualScale;
+        var scaledHeight = height / visualScale;
+        var mainFonts = new MainFontSet(_latinFont, _cjkFont, _japaneseFont);
+        var (baseWidth, pillHeight) = ComputeBasePillSize(scaledWidth, frame, mainFonts, _translationFont);
+        var sideInset = (float)(86d * (1d - Math.Clamp(frame.SidesProgress, 0d, 1d)));
+        var pillWidth = Math.Max(0f, baseWidth - sideInset);
+        var pillLeft = (scaledWidth - pillWidth) / 2f;
+        var pillTop = (scaledHeight - pillHeight) / 2f - 2f;
+        return (
+            new Rect(
+                pillLeft * visualScale,
+                pillTop * visualScale,
+                pillWidth * visualScale,
+                pillHeight * visualScale),
+            baseWidth,
+            pillHeight);
     }
 
     internal static bool HitTest(Rect pill, Point point)
@@ -1520,6 +1695,62 @@ internal sealed class IslandRenderer : IDisposable
     internal static bool HitTestFavorite(Rect pillBounds, double scale, double capsuleProgress, Point point) =>
         HitTestAlbum(pillBounds, scale, capsuleProgress, point);
 
+    private (float Width, float Height) ComputeBasePillSize(
+        float width,
+        IslandFrame frame,
+        MainFontSet mainFonts,
+        SKFont translationFont)
+    {
+        if (frame.TrackSwitch is { Waiting: true } or { Returning: true })
+            return ComputeBasePillSize(width, frame.TrackSwitch.Outgoing, mainFonts, translationFont);
+
+        var settledWidth = DesiredWidth(
+            frame.Track, frame.Line, frame.Status, mainFonts, translationFont, frame.ShowTranslation,
+            frame.TextScale, frame.EnglishWordEffects);
+        var settledHeight = DesiredPillHeight(frame.Line, frame.ShowTranslation) * frame.TextScale;
+
+        float pillWidth;
+        float pillHeight;
+        if (frame.SizeTransitionSeconds is { } sizeSeconds
+            && frame.FromWidth is { } fromWidth
+            && frame.FromHeight is { } fromHeight)
+        {
+            pillWidth = Math.Min(width - 16f,
+                AnimatedWidth(fromWidth, settledWidth, sizeSeconds));
+            pillHeight = AnimatedHeight(fromHeight, settledHeight, sizeSeconds);
+        }
+        else
+        {
+            var outgoingFrame = frame.OutgoingFrame;
+            var outgoingWidth = outgoingFrame is not null
+                ? DesiredWidth(
+                    outgoingFrame.Track, outgoingFrame.Line, outgoingFrame.Status, mainFonts, translationFont,
+                    outgoingFrame.ShowTranslation, frame.TextScale, outgoingFrame.EnglishWordEffects)
+                : DesiredWidth(
+                    frame.Track, frame.Outgoing, frame.Status, mainFonts, translationFont, frame.ShowTranslation,
+                    frame.TextScale, frame.EnglishWordEffects);
+            var outgoingHeight = outgoingFrame is not null
+                ? DesiredPillHeight(outgoingFrame.Line, outgoingFrame.ShowTranslation)
+                : DesiredPillHeight(frame.Outgoing ?? frame.Line, frame.ShowTranslation);
+            pillWidth = Math.Min(width - 16f,
+                AnimatedWidth(outgoingWidth, settledWidth, frame.TransitionSeconds));
+            pillHeight = AnimatedHeight(outgoingHeight, DesiredPillHeight(frame.Line, frame.ShowTranslation),
+                frame.TransitionSeconds) * frame.TextScale;
+        }
+
+        if (frame.SizeTransitionSeconds is null && frame.TrackSwitch is { } trackSwitch)
+        {
+            var (outWidth, outHeight) = ComputeBasePillSize(width, trackSwitch.Outgoing, mainFonts, translationFont);
+            var progress = trackSwitch.Waiting || trackSwitch.Returning
+                ? 0f
+                : (float)EaseOutCubic(Math.Clamp(trackSwitch.Seconds / TrackSwitchDuration, 0d, 1d));
+            pillWidth = Lerp(outWidth, pillWidth, progress);
+            pillHeight = Lerp(outHeight, pillHeight, progress);
+        }
+
+        return (pillWidth, pillHeight);
+    }
+
     private SKRect PillRect(
         float width,
         float height,
@@ -1527,29 +1758,9 @@ internal sealed class IslandRenderer : IDisposable
         MainFontSet mainFonts,
         SKFont translationFont)
     {
-        var settledWidth = DesiredWidth(
-            frame.Track, frame.Line, frame.Status, mainFonts, translationFont, frame.ShowTranslation,
-            frame.TextScale, frame.EnglishWordEffects);
-        var outgoingWidth = DesiredWidth(
-            frame.Track, frame.Outgoing, frame.Status, mainFonts, translationFont, frame.ShowTranslation,
-            frame.TextScale, frame.EnglishWordEffects);
+        var (baseWidth, pillHeight) = ComputeBasePillSize(width, frame, mainFonts, translationFont);
         var sideInset = (float)(86d * (1d - Math.Clamp(frame.SidesProgress, 0d, 1d)));
-        var pillWidth = Math.Min(width - 16f,
-            AnimatedWidth(outgoingWidth, settledWidth, frame.TransitionSeconds)) - sideInset;
-        var pillHeight = AnimatedHeight(
-            DesiredPillHeight(frame.Outgoing ?? frame.Line, frame.ShowTranslation),
-            DesiredPillHeight(frame.Line, frame.ShowTranslation),
-            frame.TransitionSeconds) * frame.TextScale;
-        if (frame.TrackSwitch is { } trackSwitch)
-        {
-            var outgoing = PillRect(width, height, trackSwitch.Outgoing,
-                mainFonts, translationFont);
-            var progress = trackSwitch.Waiting || trackSwitch.Returning
-                ? 0f
-                : (float)EaseOutCubic(Math.Clamp(trackSwitch.Seconds / TrackSwitchDuration, 0d, 1d));
-            pillWidth = Lerp(outgoing.Width, pillWidth, progress);
-            pillHeight = Lerp(outgoing.Height, pillHeight, progress);
-        }
+        var pillWidth = Math.Max(0f, baseWidth - sideInset);
         var pillLeft = (width - pillWidth) / 2f;
         var pillTop = (height - pillHeight) / 2f - 2f;
         return new SKRect(pillLeft, pillTop, pillLeft + pillWidth, pillTop + pillHeight);
@@ -1879,7 +2090,10 @@ internal sealed class IslandRenderer : IDisposable
         float opacity,
         bool showTranslation,
         float highlightEmphasis,
-        bool englishWordEffects)
+        bool englishWordEffects,
+        bool lyricsLift,
+        LyricsLiftMode lyricsLiftMode,
+        int glowIntensity)
     {
         if (opacity <= 0.001f || scale <= 0.001f)
             return;
@@ -1899,7 +2113,8 @@ internal sealed class IslandRenderer : IDisposable
 
         var mainX = centerX - mainWidth / 2f;
         var mainBaseline = hasTranslation ? originY - 5f : CenteredBaseline(originY, layout.Runs, mainFonts.Latin) - 2f;
-        DrawKaraokeText(canvas, line, positionMs, mainX, mainBaseline, layout, opacity, highlightEmphasis);
+        DrawKaraokeText(canvas, line, positionMs, mainX, mainBaseline, layout, opacity, highlightEmphasis,
+            lyricsLift, lyricsLiftMode, glowIntensity);
 
         if (hasTranslation)
         {
@@ -1909,6 +2124,19 @@ internal sealed class IslandRenderer : IDisposable
         canvas.Restore();
     }
 
+    internal static float GlowIntensityScale(int level) => SettingsStore.NormalizeIslandGlowIntensity(level) switch
+    {
+        1 => 0.25f,
+        2 => 0.5f,
+        3 => 0.75f,
+        4 => 1f,
+        5 => 1.35f,
+        _ => 1f
+    };
+
+    private static byte ClampAlpha(float value) =>
+        (byte)Math.Clamp(Math.Round(value), 0d, 255d);
+
     private void DrawKaraokeText(
         SKCanvas canvas,
         LyricLine line,
@@ -1917,73 +2145,132 @@ internal sealed class IslandRenderer : IDisposable
         float baseline,
         KaraokeLayout layout,
         float opacity,
-        float highlightEmphasis)
+        float highlightEmphasis,
+        bool lyricsLift,
+        LyricsLiftMode lyricsLiftMode,
+        int glowIntensity)
     {
-        var activeWidth = ActiveWidth(line, positionMs, layout);
-        _idlePaint.Color = new SKColor(108, 109, 114, (byte)(225 * opacity));
-        if (activeWidth <= 0f || highlightEmphasis <= 0f)
+        var glowScale = GlowIntensityScale(glowIntensity);
+        var sweep = ActiveSweep(line, positionMs, layout, glowScale);
+        var idleColor = new SKColor(108, 109, 114, (byte)(225 * opacity));
+        _idlePaint.Color = idleColor;
+        if (sweep.Lead <= 0f || highlightEmphasis <= 0f)
         {
             DrawMainText(canvas, layout.Runs, x, baseline, _idlePaint);
             return;
         }
 
-        var activeRight = x + activeWidth;
+        var coreColor = new SKColor(
+            (byte)(108 + 139 * highlightEmphasis),
+            (byte)(109 + 139 * highlightEmphasis),
+            (byte)(114 + 135 * highlightEmphasis),
+            (byte)((225 + 30 * highlightEmphasis) * opacity));
         foreach (var glyph in layout.Glyphs)
         {
-            var visibleWidth = Math.Clamp(activeWidth - glyph.Offset, 0f, glyph.Width);
-            var liftProgress = HighlightAgeProgress(positionMs - glyph.StartMs);
+            var glyphRight = glyph.Offset + glyph.Width;
+            var liftProgress = lyricsLift
+                ? GlyphLiftProgress(positionMs, glyph.StartMs, glyph.EndMs, glyph.SyllableDurationMs, lyricsLiftMode)
+                : 0f;
             var glowProgress = HighlightAgeProgress(positionMs - glyph.EndMs);
             var glyphX = x + glyph.Offset;
             var glyphBaseline = baseline - 4f * liftProgress * highlightEmphasis;
-            if (visibleWidth < glyph.Width)
+            if (sweep.Lead <= glyph.Offset)
             {
                 canvas.Save();
-                canvas.ClipRect(new SKRect(
-                    glyphX + visibleWidth, glyphBaseline - 38f,
-                    glyphX + glyph.Width + 1f, glyphBaseline + 11f));
                 canvas.Translate(glyphX, glyphBaseline);
                 canvas.DrawPath(glyph.Path, _idlePaint);
                 canvas.Restore();
-            }
-            if (visibleWidth <= 0f)
                 continue;
+            }
+
+            if (sweep.Trail >= glyphRight)
+            {
+                canvas.Save();
+                canvas.ClipRect(new SKRect(
+                    glyphX - 10f, glyphBaseline - 39f,
+                    glyphX + glyph.Width + 10f, glyphBaseline + 12f));
+                canvas.Translate(glyphX, glyphBaseline);
+                if (glowProgress > 0f)
+                {
+                    _edgeBloom.Color = new SKColor(255, 255, 255,
+                        ClampAlpha(51f * glowProgress * opacity * highlightEmphasis * glowScale));
+                    canvas.DrawPath(glyph.Path, _edgeBloom);
+                }
+                _wideGlow.Color = new SKColor(255, 255, 255,
+                    ClampAlpha(42f * opacity * highlightEmphasis * glowScale));
+                canvas.DrawPath(glyph.Path, _wideGlow);
+                _tightGlow.Color = new SKColor(255, 255, 255,
+                    ClampAlpha(70f * opacity * highlightEmphasis * glowScale));
+                canvas.DrawPath(glyph.Path, _tightGlow);
+                _corePaint.Color = coreColor;
+                canvas.DrawPath(glyph.Path, _corePaint);
+                canvas.Restore();
+                continue;
+            }
+
+            var trail = sweep.Trail - glyph.Offset;
+            var coreLead = sweep.CoreLead - glyph.Offset;
+            var lead = sweep.Lead - glyph.Offset;
+            var entryRamp = sweep.EntryRamp;
+            var exitRamp = sweep.ExitRamp;
 
             canvas.Save();
             canvas.ClipRect(new SKRect(
                 glyphX - 10f, glyphBaseline - 39f,
-                glyphX + visibleWidth + 5f, glyphBaseline + 12f));
+                glyphX + glyph.Width + 10f, glyphBaseline + 12f));
             canvas.Translate(glyphX, glyphBaseline);
-            if (glowProgress > 0f)
-            {
-                _edgeBloom.Color = new SKColor(255, 255, 255, (byte)(51f * glowProgress * opacity * highlightEmphasis));
-                canvas.DrawPath(glyph.Path, _edgeBloom);
-            }
-            _wideGlow.Color = new SKColor(255, 255, 255, (byte)(42 * opacity * highlightEmphasis));
-            canvas.DrawPath(glyph.Path, _wideGlow);
-            _tightGlow.Color = new SKColor(255, 255, 255, (byte)(70 * opacity * highlightEmphasis));
-            canvas.DrawPath(glyph.Path, _tightGlow);
-            _corePaint.Color = new SKColor(
-                (byte)(108 + 139 * highlightEmphasis),
-                (byte)(109 + 139 * highlightEmphasis),
-                (byte)(114 + 135 * highlightEmphasis),
-                (byte)((225 + 30 * highlightEmphasis) * opacity));
-            canvas.DrawPath(glyph.Path, _corePaint);
-            canvas.Restore();
 
-            if (visibleWidth < glyph.Width)
+            canvas.DrawPath(glyph.Path, _idlePaint);
+
+            var wideAlpha = ClampAlpha(42f * opacity * highlightEmphasis * entryRamp * glowScale);
+            if (wideAlpha > 0)
             {
-                // The reference keeps a brighter bloom around the moving highlight edge.
-                canvas.Save();
-                canvas.ClipRect(new SKRect(
-                    activeRight - 10f, glyphBaseline - 39f,
-                    activeRight + 8f, glyphBaseline + 12f));
-                canvas.Translate(glyphX, glyphBaseline);
-                _edgeBloom.Color = new SKColor(255, 255, 255, (byte)(78 * opacity * highlightEmphasis));
-                canvas.DrawPath(glyph.Path, _edgeBloom);
-                canvas.Restore();
+                using var wideShader = CreateSmoothSweepShader(
+                    trail, lead, new SKColor(255, 255, 255, wideAlpha), new SKColor(255, 255, 255, 0));
+                _wideGlow.Shader = wideShader;
+                canvas.DrawPath(glyph.Path, _wideGlow);
+                _wideGlow.Shader = null;
             }
+
+            var tightAlpha = ClampAlpha(70f * opacity * highlightEmphasis * entryRamp * glowScale);
+            if (tightAlpha > 0)
+            {
+                using var tightShader = CreateSmoothSweepShader(
+                    trail, lead, new SKColor(255, 255, 255, tightAlpha), new SKColor(255, 255, 255, 0));
+                _tightGlow.Shader = tightShader;
+                canvas.DrawPath(glyph.Path, _tightGlow);
+                _tightGlow.Shader = null;
+            }
+
+            var coreEntryColor = coreColor.WithAlpha((byte)Math.Round(coreColor.Alpha * entryRamp));
+            if (coreEntryColor.Alpha > 0)
+            {
+                using var coreShader = CreateSmoothSweepShader(trail, coreLead, coreEntryColor, coreEntryColor.WithAlpha(0));
+                _corePaint.Shader = coreShader;
+                canvas.DrawPath(glyph.Path, _corePaint);
+                _corePaint.Shader = null;
+            }
+
+            var bloomAlpha = ClampAlpha(78f * opacity * highlightEmphasis * entryRamp * exitRamp * glowScale);
+            if (bloomAlpha > 0)
+            {
+                using var bloomShader = CreateBloomBellShader(trail - 4f, lead + 2f, bloomAlpha);
+                _edgeBloom.Shader = bloomShader;
+                canvas.DrawPath(glyph.Path, _edgeBloom);
+                _edgeBloom.Shader = null;
+            }
+
+            canvas.Restore();
         }
     }
+
+    internal static float GlyphLiftProgress(
+        double positionMs,
+        double startMs,
+        double endMs,
+        double syllableDurationMs = 0,
+        LyricsLiftMode mode = LyricsLiftMode.Stay) =>
+        (float)LyricsWindowRenderer.GlyphLiftProgress(positionMs, startMs, endMs, syllableDurationMs, mode);
 
     internal static float HighlightAgeProgress(double ageMs) => ageMs <= 0d
         ? 0f
@@ -1992,31 +2279,119 @@ internal sealed class IslandRenderer : IDisposable
     internal static float ActiveWidth(LyricLine line, double positionMs, SKFont font) =>
         ActiveWidth(line, positionMs, text => font.MeasureText(text));
 
-    private static float ActiveWidth(LyricLine line, double positionMs, KaraokeLayout layout)
-    {
-        if (positionMs <= line.StartMs)
-            return 0f;
+    private readonly record struct KaraokeSweep(
+        float Trail,
+        float CoreLead,
+        float Lead,
+        float EntryRamp,
+        float ExitRamp);
 
+    private static readonly float[] SweepGradientPositions = [0f, 1f / 6f, 2f / 6f, 3f / 6f, 4f / 6f, 5f / 6f, 1f];
+
+    private static SKShader CreateSmoothSweepShader(float startX, float endX, SKColor startColor, SKColor endColor)
+    {
+        if (endX <= startX + 0.01f)
+            endX = startX + 0.01f;
+
+        var colors = new SKColor[SweepGradientPositions.Length];
+        for (var i = 0; i < SweepGradientPositions.Length; i++)
+        {
+            var t = SweepGradientPositions[i];
+            var w = t * t * t * (t * (t * 6f - 15f) + 10f);
+            colors[i] = new SKColor(
+                (byte)Math.Round(startColor.Red + (endColor.Red - startColor.Red) * w),
+                (byte)Math.Round(startColor.Green + (endColor.Green - startColor.Green) * w),
+                (byte)Math.Round(startColor.Blue + (endColor.Blue - startColor.Blue) * w),
+                (byte)Math.Round(startColor.Alpha + (endColor.Alpha - startColor.Alpha) * w));
+        }
+        return SKShader.CreateLinearGradient(
+            new SKPoint(startX, 0f),
+            new SKPoint(endX, 0f),
+            colors,
+            SweepGradientPositions,
+            SKShaderTileMode.Clamp);
+    }
+
+    private static SKShader CreateBloomBellShader(float startX, float endX, byte peakAlpha)
+    {
+        if (endX <= startX + 0.01f)
+            endX = startX + 0.01f;
+
+        var colors = new SKColor[SweepGradientPositions.Length];
+        for (var i = 0; i < SweepGradientPositions.Length; i++)
+        {
+            var s = MathF.Sin(MathF.PI * SweepGradientPositions[i]);
+            var alpha = (byte)Math.Round(peakAlpha * s * s);
+            colors[i] = new SKColor(255, 255, 255, alpha);
+        }
+        return SKShader.CreateLinearGradient(
+            new SKPoint(startX, 0f),
+            new SKPoint(endX, 0f),
+            colors,
+            SweepGradientPositions,
+            SKShaderTileMode.Clamp);
+    }
+
+    private static KaraokeSweep ActiveSweep(LyricLine line, double positionMs, KaraokeLayout layout, float glowScale = 1f)
+    {
+        if (positionMs <= line.StartMs || layout.Width <= 0f)
+            return default;
+
+        var bleedWidth = 12f * (0.4f + 0.6f * glowScale);
+        var coreBleed = Math.Min(6f, bleedWidth * 0.5f);
+        const float trailWidth = 12f;
+        float activeWidth;
         if (layout.Syllables.Length == 0)
         {
             var duration = Math.Max(1, line.EndMs - line.StartMs);
-            var p = Math.Clamp((positionMs - line.StartMs) / (double)duration, 0d, 1d);
-            return layout.Width * (float)SmoothStep(p);
+            var p = SmoothStep(Math.Clamp((positionMs - line.StartMs) / (double)duration, 0d, 1d));
+            activeWidth = layout.Width * (float)p;
         }
-
-        foreach (var syllable in layout.Syllables)
+        else if (positionMs >= line.EndMs && positionMs >= layout.Syllables[^1].EndMs)
         {
-            if (positionMs < syllable.StartMs)
-                return syllable.PrefixWidth;
-
-            if (positionMs <= syllable.EndMs)
+            return new KaraokeSweep(layout.Width, layout.Width + coreBleed, layout.Width + bleedWidth, 1f, 0f);
+        }
+        else
+        {
+            activeWidth = 0f;
+            var prevEndMs = line.StartMs;
+            var prevRight = 0f;
+            for (var i = 0; i < layout.Syllables.Length; i++)
             {
-                var duration = Math.Max(1, syllable.EndMs - syllable.StartMs);
-                var p = Math.Clamp((positionMs - syllable.StartMs) / (double)duration, 0d, 1d);
-                return syllable.PrefixWidth + syllable.Width * (float)SmoothStep(p);
+                var syllable = layout.Syllables[i];
+                if (positionMs < syllable.StartMs)
+                {
+                    if (positionMs > prevEndMs && syllable.StartMs > prevEndMs && syllable.PrefixWidth > prevRight)
+                    {
+                        var gapT = (positionMs - prevEndMs) / (double)(syllable.StartMs - prevEndMs);
+                        activeWidth = prevRight + (syllable.PrefixWidth - prevRight) * (float)gapT;
+                    }
+                    break;
+                }
+
+                var syllableRight = syllable.PrefixWidth + syllable.Width;
+                if (positionMs <= syllable.EndMs && syllable.Width > 0f)
+                {
+                    var duration = Math.Max(1, syllable.EndMs - syllable.StartMs);
+                    var rawP = Math.Clamp((positionMs - syllable.StartMs) / (double)duration, 0d, 1d);
+                    var p = 0.65d * rawP + 0.35d * SmoothStep(rawP);
+                    activeWidth = syllable.PrefixWidth + syllable.Width * (float)p;
+                    break;
+                }
+
+                activeWidth = syllableRight;
+                prevEndMs = syllable.EndMs;
+                prevRight = syllableRight;
             }
         }
-        return layout.Width;
+
+        var entryRamp = (float)SmoothStep(Math.Clamp(activeWidth / 10f, 0f, 1f));
+        var endRemaining = Math.Clamp((layout.Width - activeWidth) / trailWidth, 0f, 1f);
+        var trail = activeWidth - trailWidth * endRemaining;
+        var coreLead = (activeWidth + coreBleed) * entryRamp;
+        var lead = (activeWidth + bleedWidth) * entryRamp;
+        var exitRamp = (float)SmoothStep(Math.Clamp((layout.Width + bleedWidth * 0.5f - lead) / (bleedWidth * 0.5f), 0f, 1f));
+        return new KaraokeSweep(trail, coreLead, lead, entryRamp, exitRamp);
     }
 
     private static float ActiveWidth(LyricLine line, double positionMs, Func<string, float> measure)
@@ -2054,15 +2429,30 @@ internal sealed class IslandRenderer : IDisposable
         IslandFrame frame,
         SKRect clip,
         MainFontSet mainFonts,
-        SKFont translationFont)
+        SKFont translationFont,
+        float scale = 1f,
+        float opacity = 1f)
     {
+        if (opacity <= 0.001f || scale <= 0.001f)
+            return;
+
         var title = frame.Track?.Title ?? frame.Status ?? "等待播放信息";
         var subtitle = StatusSubtitle(frame.Track, frame.Status);
         var titleLayout = LayoutMainText(title, mainFonts);
         var subtitleWidth = translationFont.MeasureText(subtitle);
         var originY = clip.MidY + DoubleLineOriginOffset;
+        canvas.Save();
+        if (scale < 0.999f)
+        {
+            canvas.Translate(clip.MidX, originY);
+            canvas.Scale(scale, 1f);
+            canvas.Translate(-clip.MidX, -originY);
+        }
+        _titlePaint.Color = new SKColor(242, 243, 244, ClampAlpha(255f * opacity));
+        _subtitlePaint.Color = new SKColor(145, 146, 151, ClampAlpha(255f * opacity));
         DrawMainText(canvas, titleLayout.Runs, clip.MidX - titleLayout.Width / 2f, originY - 5f, _titlePaint);
         canvas.DrawText(subtitle, clip.MidX - subtitleWidth / 2f, originY + 24f, translationFont, _subtitlePaint);
+        canvas.Restore();
     }
 
     private float DesiredWidth(
@@ -2094,7 +2484,7 @@ internal sealed class IslandRenderer : IDisposable
         return Math.Max(content + 146f, 390f);
     }
 
-    private static string StatusSubtitle(TrackInfo? track, string? status)
+    internal static string StatusSubtitle(TrackInfo? track, string? status)
     {
         if (track is not null)
             return status ?? string.Join(", ", track.Artists);
@@ -2178,31 +2568,70 @@ internal sealed class IslandRenderer : IDisposable
         var translationWidth = string.IsNullOrWhiteSpace(line.Translation)
             ? 0f
             : _translationFont.MeasureText(line.Translation);
+        var glyphs = BuildGlyphs(runs, line, width, englishWordEffects);
         return _karaokeLayout1 = new KaraokeLayout(
             runs,
-            BuildGlyphs(runs, line, width, englishWordEffects),
-            BuildSyllables(line, fonts, englishWordEffects),
+            glyphs,
+            BuildSyllables(line, glyphs, fonts, englishWordEffects),
             width,
             translationWidth);
     }
 
-    private static KaraokeSyllable[] BuildSyllables(LyricLine line, MainFontSet fonts, bool englishWordEffects)
+    private static KaraokeSyllable[] BuildSyllables(
+        LyricLine line,
+        List<KaraokeGlyph> glyphs,
+        MainFontSet fonts,
+        bool englishWordEffects)
     {
         var sourceSyllables = LyricsTextLayout.EffectiveSyllables(line, englishWordEffects);
         if (sourceSyllables.IsDefaultOrEmpty)
             return [];
 
-        var japanese = line.Text.EnumerateRunes().Any(IsKana);
         var syllables = new KaraokeSyllable[sourceSyllables.Length];
+        if (glyphs.Count > 0 && sourceSyllables.Sum(syllable => syllable.Text.Length) == line.Text.Length)
+        {
+            var textOffset = 0;
+            var glyphIndex = 0;
+            var previousEnd = 0f;
+            for (var i = 0; i < sourceSyllables.Length; i++)
+            {
+                var syllable = sourceSyllables[i];
+                var first = glyphIndex;
+                var endOffset = textOffset + syllable.Text.Length;
+                while (glyphIndex < glyphs.Count && glyphs[glyphIndex].TextOffset < endOffset)
+                    glyphIndex++;
+                var visibleEnd = glyphIndex;
+                while (visibleEnd > first && glyphs[visibleEnd - 1].IsWhitespace)
+                    visibleEnd--;
+                if (visibleEnd <= first)
+                    visibleEnd = glyphIndex;
+                var prefixWidth = first < glyphs.Count ? glyphs[first].Offset : previousEnd;
+                var endWidth = visibleEnd > first
+                    ? glyphs[visibleEnd - 1].Offset + glyphs[visibleEnd - 1].Width
+                    : prefixWidth;
+                syllables[i] = new KaraokeSyllable(
+                    syllable.StartMs,
+                    syllable.EndMs,
+                    prefixWidth,
+                    Math.Max(0f, endWidth - prefixWidth));
+                previousEnd = glyphIndex > first
+                    ? glyphs[glyphIndex - 1].Offset + glyphs[glyphIndex - 1].Width
+                    : endWidth;
+                textOffset = endOffset;
+            }
+            return syllables;
+        }
+
+        var japanese = line.Text.EnumerateRunes().Any(IsKana);
         var builder = new StringBuilder(line.Text.Length);
-        var prefixWidth = 0f;
+        var fallbackPrefixWidth = 0f;
         for (var i = 0; i < sourceSyllables.Length; i++)
         {
             var syllable = sourceSyllables[i];
             var width = MeasureMainText(syllable.Text, fonts, japanese);
-            syllables[i] = new KaraokeSyllable(syllable.StartMs, syllable.EndMs, prefixWidth, width);
+            syllables[i] = new KaraokeSyllable(syllable.StartMs, syllable.EndMs, fallbackPrefixWidth, width);
             builder.Append(syllable.Text);
-            prefixWidth = MeasureMainText(builder.ToString(), fonts, japanese);
+            fallbackPrefixWidth = MeasureMainText(builder.ToString(), fonts, japanese);
         }
         return syllables;
     }
@@ -2252,7 +2681,10 @@ internal sealed class IslandRenderer : IDisposable
                             item.Offset,
                             item.Width,
                             item.TextOffset)
-                        { WordGroup = group });
+                        {
+                            WordGroup = group,
+                            IsWhitespace = string.IsNullOrWhiteSpace(item.Text)
+                        });
                     }
                     i = end;
                 }
@@ -2263,7 +2695,10 @@ internal sealed class IslandRenderer : IDisposable
                         run.Font.GetTextPath(item.Text, SKPoint.Empty),
                         item.Offset,
                         item.Width,
-                        item.TextOffset));
+                        item.TextOffset)
+                    {
+                        IsWhitespace = string.IsNullOrWhiteSpace(item.Text)
+                    });
                     i++;
                 }
             }
@@ -2291,7 +2726,18 @@ internal sealed class IslandRenderer : IDisposable
                 var endOffset = syllableOffset + syllable.Text.Length;
                 while (glyphIndex < glyphs.Count && glyphs[glyphIndex].TextOffset < endOffset)
                     glyphIndex++;
-                SetGlyphRangeEndTimes(glyphs, first, glyphIndex, syllable.StartMs, syllable.EndMs);
+                var visibleEnd = glyphIndex;
+                while (visibleEnd > first && glyphs[visibleEnd - 1].IsWhitespace)
+                    visibleEnd--;
+                var rangeEnd = visibleEnd > first ? visibleEnd : glyphIndex;
+                SetGlyphRangeEndTimes(glyphs, first, rangeEnd, syllable.StartMs, syllable.EndMs);
+                var syllableDuration = Math.Max(1d, syllable.EndMs - syllable.StartMs);
+                for (var i = rangeEnd; i < glyphIndex; i++)
+                {
+                    glyphs[i].StartMs = syllable.EndMs;
+                    glyphs[i].EndMs = syllable.EndMs;
+                    glyphs[i].SyllableDurationMs = syllableDuration;
+                }
                 syllableOffset = endOffset;
             }
         }
@@ -2316,10 +2762,12 @@ internal sealed class IslandRenderer : IDisposable
                 end++;
             var startMs = glyphs[start].StartMs;
             var endMs = glyphs[end - 1].EndMs;
+            var durationMs = Math.Max(1d, endMs - startMs);
             for (var i = start; i < end; i++)
             {
                 glyphs[i].StartMs = startMs;
                 glyphs[i].EndMs = endMs;
+                glyphs[i].SyllableDurationMs = durationMs;
             }
             start = end;
         }
@@ -2346,6 +2794,7 @@ internal sealed class IslandRenderer : IDisposable
                 (glyphs[i].Offset + glyphs[i].Width - visualStart) / width, 0f, 1f);
             glyphs[i].StartMs = startMs + duration * InverseSmoothStep(left);
             glyphs[i].EndMs = startMs + duration * InverseSmoothStep(right);
+            glyphs[i].SyllableDurationMs = duration;
         }
     }
 
@@ -2581,7 +3030,9 @@ internal sealed class IslandRenderer : IDisposable
     {
         public double StartMs { get; set; }
         public double EndMs { get; set; }
+        public double SyllableDurationMs { get; set; }
         public int WordGroup { get; init; } = -1;
+        public bool IsWhitespace { get; init; }
     }
     private readonly record struct MainFontSet(SKFont Latin, SKFont Cjk, SKFont Japanese);
     private readonly record struct MainTextRun(string Text, SKFont Font, float Offset);

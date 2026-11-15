@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Media;
 using SkiaSharp;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>Shared glass surfaces and cover-derived colours for the song panels.</summary>
 internal static class LyricsTheme
@@ -28,18 +28,22 @@ internal static class LyricsTheme
     public static readonly IBrush Divider = new SolidColorBrush(Color.FromArgb(0x16, 255, 255, 255));
     public static readonly IBrush PrimaryText = new SolidColorBrush(Color.FromArgb(0xF2, 255, 255, 255));
     public static readonly IBrush MutedText = new SolidColorBrush(Color.FromArgb(0xA5, 255, 255, 255));
-    public static readonly SolidColorBrush Accent = new SolidColorBrush(Color.Parse("#89D4A2"));
-    public static readonly SolidColorBrush OnAccent = new SolidColorBrush(Color.Parse("#0C1A12"));
-    public static readonly SolidColorBrush AccentHover = new(Color.Parse("#A3E0B8"));
-    public static readonly SolidColorBrush AccentPressed = new(Color.Parse("#76C28F"));
-    public static readonly SolidColorBrush NavActive = new(Color.FromArgb(0x30, 0x89, 0xD4, 0xA2));
-    public static readonly SolidColorBrush DropDownBackground = new(Color.Parse("#262F3D"));
+    internal static readonly SKColor DefaultColorA = new(57, 80, 102);
+    internal static readonly SKColor DefaultColorB = new(76, 51, 75);
+
+    public static readonly SolidColorBrush Accent = new();
+    public static readonly SolidColorBrush OnAccent = new();
+    public static readonly SolidColorBrush AccentHover = new();
+    public static readonly SolidColorBrush AccentPressed = new();
+    public static readonly SolidColorBrush NavActive = new();
+    public static readonly SolidColorBrush DropDownBackground = new();
+
+    static LyricsTheme() => ApplyCover(null);
 
     public static void ApplyCover(SKBitmap? cover)
     {
-        var a = new SKColor(57, 80, 102);
-        var b = new SKColor(76, 51, 75);
-        var accent = new SKColor(137, 212, 162);
+        var a = DefaultColorA;
+        var b = DefaultColorB;
         if (cover is not null)
         {
             using var small = SKSurface.Create(new SKImageInfo(64, 64));
@@ -48,8 +52,8 @@ internal static class LyricsTheme
             using var pixels = SKBitmap.FromImage(image);
             a = Average(pixels, 0, 32);
             b = Average(pixels, 32, 64);
-            accent = CoverAccent(a, b);
         }
+        var accent = CoverAccent(a, b);
         Accent.Color = ToColor(accent);
         AccentHover.Color = Tint(accent, .22f);
         AccentPressed.Color = Tint(accent, -.12f);

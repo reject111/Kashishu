@@ -12,7 +12,7 @@ using Avalonia.Skia;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed class LyricsWindow : Window
 {
@@ -26,7 +26,7 @@ internal sealed class LyricsWindow : Window
         Func<PanelPage> createSettings, Func<PanelPage> createBanner, Func<bool, bool> setTranslation, Func<bool, bool> setIslandVisibility,
         HeadphoneService headphones)
     {
-        Title = "歌词 · Lyricify Island";
+        Title = "歌词 · Kashishu";
         Icon = icon;
         Width = 1120;
         Height = 720;
@@ -352,7 +352,9 @@ internal sealed class LyricsWindowControl : Control, IDisposable
             Headphones = _headphoneStatus,
             PanelProgress = PanelProgress(_clock.Elapsed.TotalSeconds),
             ActivePanel = _panelKind,
-            EnglishWordEffects = _settings.EnglishWordEffects
+            EnglishWordEffects = _settings.EnglishWordEffects,
+            LyricsLift = _settings.WindowLyricsLift,
+            LyricsLiftMode = _settings.WindowLyricsLiftMode
         };
         context.Custom(new LyricsWindowDrawOperation(new Rect(Bounds.Size), _renderer, frame));
     }

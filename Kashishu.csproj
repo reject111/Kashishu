@@ -6,8 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>LyricifyIsland</AssemblyName>
-    <RootNamespace>LyricifyIsland</RootNamespace>
+    <AssemblyName>Kashishu</AssemblyName>
+    <RootNamespace>Kashishu</RootNamespace>
     <!-- The Wayland accessibility bridge uses Avalonia's internal automation root API. -->
     <AvaloniaAccessUnstablePrivateApis>true</AvaloniaAccessUnstablePrivateApis>
     <!-- Avalonia 12's optional analyzers target newer Roslyn; this app has no XAML generation. -->
@@ -30,9 +30,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources/Headphones/*.json" LogicalName="LyricifyIsland.Headphones.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Resources/Headphones/*.json" LogicalName="Kashishu.Headphones.%(Filename)%(Extension)" />
     <EmbeddedResource
       Include="vendor/Lyricify-Lyrics-Helper/Lyricify.Lyrics.Helper/Resources/icon.png"
-      LogicalName="LyricifyIsland.icon.png" />
+      LogicalName="Kashishu.icon.png" />
   </ItemGroup>
 </Project>

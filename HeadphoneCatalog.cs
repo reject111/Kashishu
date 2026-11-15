@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 // Protocol indices and model metadata: OppoPodsManager, see THIRD_PARTY_NOTICES.md.
 internal sealed record HeadphoneProfile
@@ -98,7 +98,7 @@ internal static class HeadphoneCatalog
     private static JsonDocument ReadResource(string name)
     {
         using var stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream($"LyricifyIsland.Headphones.{name}.json")!;
+            .GetManifestResourceStream($"Kashishu.Headphones.{name}.json")!;
         return JsonDocument.Parse(stream);
     }
 

@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Tmds.DBus.Protocol;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed partial class HeadphoneService : IDisposable
 {
@@ -20,7 +20,7 @@ internal sealed partial class HeadphoneService : IDisposable
     private readonly HashSet<string> _suppressedConnections = [];
     private readonly Dictionary<string, int> _autoConnectFailures = [];
     private readonly HashSet<string> _resolvedDevices = [];
-    private readonly string _settingsPath = Path.Combine(SettingsStore.ConfigHome(), "lyricify-island", "headphones.json");
+    private readonly string _settingsPath = Path.Combine(SettingsStore.ConfigHome(), "kashishu", "headphones.json");
     private HeadphoneState _state = new();
     private HeadphoneProfile? _profile;
     private Session? _session;

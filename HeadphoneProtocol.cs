@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 // Protocol facts: Leaf-lsgtky/OppoPods and Zhaoyi-ya/OppoPodsManager.
 // LinkLen is a 7-bit little-endian varint, including the seven-byte inner header.
