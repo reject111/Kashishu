@@ -1,0 +1,139 @@
+name: Desktop installers
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content LyricifyIsland.csproj
+          $version = ($project.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1)
+          if (-not $version) { throw 'Version missing from LyricifyIsland.csproj' }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: ./build-installer.ps1 -Version $env:VERSION
+
+      - name: Self test
+        shell: pwsh
+        run: ./dist/LyricifyIsland.exe --self-test
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LyricifyIsland-Windows-${{ env.VERSION }}-build.${{ github.run_number }}
+          path: |
+            dist/LyricifyIsland-Setup-*.exe
+            dist/LyricifyIsland.exe
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' LyricifyIsland.csproj | head -1)
+          if [[ -z "$version" ]]; then
+            echo 'Version missing from LyricifyIsland.csproj' >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build app bundle and DMG
+        run: |
+          chmod +x ./build-macos.sh
+          ./build-macos.sh
+
+      - name: Self test
+        run: ./dist/LyricifyIsland --self-test
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LyricifyIsland-macOS-${{ env.VERSION }}-build.${{ github.run_number }}
+          path: dist/LyricifyIsland-*.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' LyricifyIsland.csproj | head -1)
+          if [[ -z "$version" ]]; then
+            echo 'Version missing from LyricifyIsland.csproj' >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}-build.${{ github.run_number }}
+          name: Lyricify Island ${{ env.VERSION }} (build ${{ github.run_number }})
+          body: |
+            Windows 安装包与 macOS 磁盘映像由 GitHub Actions 自动构建。
+
+            - Windows 安装版：`LyricifyIsland-Setup-${{ env.VERSION }}.exe`（当前用户目录，无需管理员权限）
+            - Windows 便携版：`LyricifyIsland.exe`（单个可执行文件，自带运行时）
+            - macOS：`LyricifyIsland-${{ env.VERSION }}-<架构>.dmg`（内含 `LyricifyIsland.app`）
+
+            macOS 构建只有 ad-hoc 签名，未使用 Developer ID 签名，也未公证，因此首次打开会被 Gatekeeper 拦截。
+            请将 `LyricifyIsland.app` 拖入“应用程序”后右键选择“打开”，或执行：
+
+            ```bash
+            xattr -dr com.apple.quarantine /Applications/LyricifyIsland.app
+            ```
+
+            DMG 文件名中的架构对应构建机架构（GitHub 的 `macos-latest` 为 Apple Silicon）；
+            Intel Mac 可检出源码后运行 `./build-macos.sh` 本地构建。
+
+            提交：${{ github.sha }}
+          files: |
+            dist/LyricifyIsland-Setup-*.exe
+            dist/LyricifyIsland.exe
+            dist/LyricifyIsland-*.dmg
+          make_latest: true

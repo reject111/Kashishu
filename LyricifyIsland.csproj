@@ -39,8 +39,29 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources/Headphones/*.json" LogicalName="LyricifyIsland.Headphones.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Resources/MacMediaBridge.js" LogicalName="LyricifyIsland.MacMediaBridge.js" />
+    <EmbeddedResource Include="Resources/MacTrayIcon.png" LogicalName="LyricifyIsland.MacTrayIcon.png" />
     <EmbeddedResource
       Include="vendor/Lyricify-Lyrics-Helper/Lyricify.Lyrics.Helper/Resources/icon.png"
       LogicalName="LyricifyIsland.icon.png" />
   </ItemGroup>
+
+  <!-- The .NET apphost currently declares an older linked SDK, which makes AppKit
+       use legacy traffic lights even though Avalonia.Native uses the macOS 26 SDK. -->
+  <Target Name="EnableMacGlassForBuild" AfterTargets="Build"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) and ('$(RuntimeIdentifier)' == '' or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx-'))) and Exists('$(TargetDir)$(AssemblyName)')">
+    <Exec Command="bash &quot;$(MSBuildProjectDirectory)/packaging/enable-macos-glass.sh&quot; &quot;$(TargetDir)$(AssemblyName)&quot;" />
+  </Target>
+  <Target Name="EnableMacGlassForPublish" AfterTargets="Publish"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) and ('$(RuntimeIdentifier)' == '' or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx-'))) and Exists('$(PublishDir)$(AssemblyName)')">
+    <Exec Command="bash &quot;$(MSBuildProjectDirectory)/packaging/enable-macos-glass.sh&quot; &quot;$(PublishDir)$(AssemblyName)&quot;" />
+  </Target>
+  <Target Name="BuildMacGlassIsland" AfterTargets="Build"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) and ('$(RuntimeIdentifier)' == '' or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx-')))">
+    <Exec Command="bash &quot;$(MSBuildProjectDirectory)/packaging/build-macos-glass-island.sh&quot; &quot;$(TargetDir)&quot; &quot;$(RuntimeIdentifier)&quot; &quot;$(Configuration)&quot;" />
+  </Target>
+  <Target Name="PublishMacGlassIsland" AfterTargets="Publish"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) and ('$(RuntimeIdentifier)' == '' or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx-')))">
+    <Exec Command="bash &quot;$(MSBuildProjectDirectory)/packaging/build-macos-glass-island.sh&quot; &quot;$(PublishDir)&quot; &quot;$(RuntimeIdentifier)&quot; &quot;$(Configuration)&quot;" />
+  </Target>
 </Project>

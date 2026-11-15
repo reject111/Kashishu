@@ -52,9 +52,13 @@ public sealed class OverlayWindow : Window
 #if WINDOWS
     private WindowsOverlay? _windowsOverlay;
 #endif
+    private MacOverlay? _macOverlay;
+    private DispatcherTimer? _macDragTimer;
+    private bool _macDragging;
     private bool _opened;
     private bool _closed;
     private bool _temporarilyHidden;
+    private bool _nativeIslandActive;
 
     internal OverlayWindow(
         PlaybackStore store,
@@ -184,6 +188,29 @@ public sealed class OverlayWindow : Window
             }
         };
 #endif
+        if (OperatingSystem.IsMacOS())
+        {
+            _macDragTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
+            _macDragTimer.Tick += (_, _) => SettleMacDrag();
+            PositionChanged += (_, _) =>
+            {
+                if (!_opened)
+                    return;
+                UpdateScreenMapping();
+                if (!_macDragging)
+                    return;
+                // The native drag loop does not deliver a pointer release; remember the
+                // position as it changes and settle it once the window stops moving.
+                _dragPosition = Position;
+                _macDragTimer!.Stop();
+                _macDragTimer.Start();
+            };
+            PropertyChanged += (_, args) =>
+            {
+                if (_opened && args.Property.Name == "RenderScaling")
+                    UpdateSurfaceRegions(_island.PillBounds);
+            };
+        }
 
         Opened += (_, _) =>
         {
@@ -205,6 +232,11 @@ public sealed class OverlayWindow : Window
                     _windowsOverlay.SetCaptureHidden(_settings.AcrylicIsland);
                 }
 #endif
+                if (OperatingSystem.IsMacOS())
+                {
+                    _macOverlay = new MacOverlay(this);
+                    _macOverlay.Attach();
+                }
             }
             UpdateSurfaceRegions(_island.PillBounds);
         };
@@ -219,6 +251,10 @@ public sealed class OverlayWindow : Window
 #if WINDOWS
             _windowsOverlay?.Dispose();
 #endif
+            _macDragTimer?.Stop();
+            _macDragTimer = null;
+            _macOverlay?.Dispose();
+            _macOverlay = null;
             _island.Cursor?.Dispose();
             _island.Dispose();
         };
@@ -242,8 +278,35 @@ public sealed class OverlayWindow : Window
             ApplyGeometry();
     }
 
+    /// <summary>
+    /// The native Liquid Glass process owns the visible island while it is active. Keep the
+    /// Avalonia window alive for playback/rendering state, but get its transparent rectangle out
+    /// of the window server so it cannot compete with the native panel.
+    /// </summary>
+    internal void SetNativeIslandActive(bool active)
+    {
+        if (_nativeIslandActive == active)
+            return;
+        _nativeIslandActive = active;
+        if (active)
+        {
+            _macOverlay?.SetIslandRegion(default, true);
+            Hide();
+            return;
+        }
+        Show();
+        ApplyGeometry();
+        UpdateSurfaceRegions(_island.PillBounds);
+    }
+
     private void UpdateSurfaceRegions(Rect bounds)
     {
+        if (_nativeIslandActive)
+        {
+            _nativeOverlay?.SetIslandRegion(bounds, true, false);
+            _macOverlay?.SetIslandRegion(bounds, true);
+            return;
+        }
         _nativeOverlay?.SetIslandRegion(bounds, _settings.ClickThrough || _temporarilyHidden,
             _settings.BackgroundBlur && !_temporarilyHidden);
 #if WINDOWS
@@ -251,6 +314,9 @@ public sealed class OverlayWindow : Window
         // visible; only the hidden state can drop the region entirely.
         _windowsOverlay?.SetIslandRegion(bounds, _temporarilyHidden);
 #endif
+        // macOS has no per-window input shape; MacOverlay decides from the pointer position
+        // whether the window takes clicks, so the click-through switch applies to the island.
+        _macOverlay?.SetIslandRegion(bounds, _settings.ClickThrough || _temporarilyHidden);
     }
 
     internal static double CalculateLogicalWidth(int physicalWidth, double scaling, double percent)
@@ -273,6 +339,21 @@ public sealed class OverlayWindow : Window
     {
         _dragPosition = ConstrainToWorkingArea(Position);
         Position = _dragPosition.Value;
+        UpdateScreenMapping();
+    }
+
+    /// <summary>macOS has no "move loop ended" notification, so the position is settled once
+    /// the window has stopped moving for a short while.</summary>
+    private void SettleMacDrag()
+    {
+        if (_macDragTimer is null)
+            return;
+        _macDragTimer.Stop();
+        _macDragging = false;
+        var constrained = ConstrainToWorkingArea(Position);
+        _dragPosition = constrained;
+        if (Position != constrained)
+            Position = constrained;
         UpdateScreenMapping();
     }
 
@@ -345,9 +426,12 @@ public sealed class OverlayWindow : Window
         if (!_settings.LockPosition)
         {
             _pressArgs = null;
+            if (OperatingSystem.IsMacOS())
+                _macDragging = true;
             // BeginMoveDrag hands the pointer to the OS move loop and returns at once; the
             // loop itself is constrained through WM_WINDOWPOSCHANGING (WindowsOverlay), and
-            // the final position is settled in WM_EXITSIZEMOVE.
+            // the final position is settled in WM_EXITSIZEMOVE. macOS reports every move
+            // through PositionChanged and settles after the window stops moving.
             BeginMoveDrag(press);
         }
         args.Handled = true;
@@ -597,7 +681,7 @@ public sealed class OverlayWindow : Window
 
     private void ApplyGeometry()
     {
-        var screen = OperatingSystem.IsWindows() && _dragPosition is not null
+        var screen = PlatformInfo.UsesExplicitWindowPlacement && _dragPosition is not null
             ? Screens.ScreenFromWindow(this) ?? Screens.Primary
             : Screens.Primary ?? Screens.All.FirstOrDefault();
         var width = Math.Round(screen is null ? Width
@@ -612,9 +696,9 @@ public sealed class OverlayWindow : Window
         MinWidth = MaxWidth = width;
         MinHeight = MaxHeight = height;
 
-        // Wayland compositors place toplevels themselves; Windows needs an explicit top-centre
-        // position and will otherwise centre the transparent window on the whole screen.
-        if (OperatingSystem.IsWindows() && screen is not null)
+        // Wayland compositors place toplevels themselves; Windows and macOS need an explicit
+        // top-centre position and would otherwise centre the transparent window on the screen.
+        if (PlatformInfo.UsesExplicitWindowPlacement && screen is not null)
         {
             var scaling = screen.Scaling > 0 && double.IsFinite(screen.Scaling) ? screen.Scaling : 1d;
             var physicalWidth = (int)Math.Round(width * scaling);
@@ -639,7 +723,7 @@ public sealed class OverlayWindow : Window
     /// </summary>
     internal PixelPoint ConstrainToWorkingArea(PixelPoint position)
     {
-        if (!OperatingSystem.IsWindows())
+        if (!PlatformInfo.UsesExplicitWindowPlacement)
             return position;
 
         var bounds = _island.FullPillBounds;
@@ -648,7 +732,9 @@ public sealed class OverlayWindow : Window
         if (bounds.Width <= 0d || bounds.Height <= 0d)
             return position;
 
-        var scaling = RenderScaling;
+        // Windows positions windows in physical pixels; macOS uses points, the same unit as
+        // its logical island bounds.
+        var scaling = OperatingSystem.IsMacOS() ? 1d : RenderScaling;
         if (!double.IsFinite(scaling) || scaling <= 0d)
             scaling = 1d;
         var pillWidth = bounds.Width * scaling;

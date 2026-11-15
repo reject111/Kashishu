@@ -82,10 +82,11 @@ public sealed class PlaybackStore
     public const string NoActiveSpotifyPlaybackStatus = "Spotify 当前没有播放";
     public const string NoActiveMprisPlaybackStatus = "MPRIS 当前没有播放";
     public const string NoActiveWindowsPlaybackStatus = "本地媒体会话当前没有播放";
+    public const string NoActiveMacPlaybackStatus = "本地播放器当前没有播放";
 
     internal static bool IsNoActivePlayback(string status) =>
         status is NoActiveSpotifyPlaybackStatus or NoActiveMprisPlaybackStatus
-            or NoActiveWindowsPlaybackStatus;
+            or NoActiveWindowsPlaybackStatus or NoActiveMacPlaybackStatus;
 
     internal static bool RequiresAttention(string status) =>
         status == MissingSpotifyCredentialsStatus
@@ -93,10 +94,12 @@ public sealed class PlaybackStore
         || status.StartsWith("正在等待 Spotify 授权", StringComparison.Ordinal)
         || status.StartsWith("正在连接 MPRIS", StringComparison.Ordinal)
         || status.StartsWith("正在连接本地媒体会话", StringComparison.Ordinal)
+        || status.StartsWith("正在连接本地播放器", StringComparison.Ordinal)
         || !IsNoActivePlayback(status)
             && (status.StartsWith("Spotify ", StringComparison.Ordinal)
                 || status.StartsWith("MPRIS ", StringComparison.Ordinal)
-                || status.StartsWith("本地媒体会话 ", StringComparison.Ordinal));
+                || status.StartsWith("本地媒体会话 ", StringComparison.Ordinal)
+                || status.StartsWith("本地播放器 ", StringComparison.Ordinal));
 
     private PlaybackSnapshot _snapshot = new(
         null, 0, System.Diagnostics.Stopwatch.GetTimestamp(), false, "正在连接播放信息源…");

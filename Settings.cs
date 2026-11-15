@@ -419,6 +419,8 @@ internal static class Autostart
         if (OperatingSystem.IsWindows())
             return SetEnabledWindows(enabled, executable);
 #endif
+        if (OperatingSystem.IsMacOS())
+            return SetEnabledMac(enabled, executable);
         if (!OperatingSystem.IsLinux())
             return !enabled;
 
@@ -490,6 +492,71 @@ internal static class Autostart
         }
     }
 #endif
+
+    /// <summary>macOS login items are LaunchAgents in the user's Library. The agent points at
+    /// the executable itself; when the app runs from a bundle that is the binary inside it, so
+    /// the bundle keeps its identity and automation permissions across launches.</summary>
+    private static bool SetEnabledMac(bool enabled, string? executable)
+    {
+        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Library", "LaunchAgents", "com.lyricifyisland.app.plist");
+        try
+        {
+            if (!enabled)
+            {
+                File.Delete(path);
+                return true;
+            }
+
+            executable ??= Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable))
+                throw new IOException("无法确定程序路径");
+
+            var directory = Path.GetDirectoryName(path)!;
+            var temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            Directory.CreateDirectory(directory);
+            try
+            {
+                File.WriteAllText(temporary, LaunchAgent(executable));
+                File.Move(temporary, path, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temporary))
+                    File.Delete(temporary);
+            }
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"[autostart] update failed: {exception.Message}");
+            return false;
+        }
+    }
+
+    internal static string LaunchAgent(string executable) =>
+        $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>com.lyricifyisland.app</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>{EscapeXml(executable)}</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>ProcessType</key>
+            <string>Interactive</string>
+        </dict>
+        </plist>
+
+        """;
+
+    private static string EscapeXml(string value) =>
+        value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     internal static string DesktopEntry(string executable) =>
         $"[Desktop Entry]\nType=Application\nName=Lyricify Island\nExec={Quote(executable)}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n";

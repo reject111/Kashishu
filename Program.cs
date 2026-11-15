@@ -81,9 +81,17 @@ internal static class Program
     {
         var builder = AppBuilder.Configure<App>();
         if (OperatingSystem.IsLinux())
+        {
             builder.UseHarfBuzz().UseSkia().UseWayland();
+        }
         else
+        {
             builder.UsePlatformDetect();
+            // The island lives in the menu bar; a Dock icon and Cmd-Tab entry would only
+            // duplicate the tray icon and put the app in the way of the user's windows.
+            if (OperatingSystem.IsMacOS())
+                builder = builder.With(new MacOSPlatformOptions { ShowInDock = false });
+        }
         return builder.AfterPlatformServicesSetup(_ => RenderScheduling.Initialize(SettingsStore.Load()));
     }
 
@@ -122,6 +130,7 @@ public sealed class App : Application
     private HeadphoneService? _headphones;
     private LyricsWindow? _lyricsWindow;
     private OverlayWindow? _overlay;
+    private MacGlassIsland? _macGlassIsland;
     private WaylandAccessibility? _accessibility;
     private WindowIcon? _appIcon;
     private PlaybackStore? _store;
@@ -173,6 +182,7 @@ public sealed class App : Application
                 Dispatcher.UIThread.Post(ShowLyricsWindow);
             if (Program.Options.Headphones && HeadphoneService.IsSupported)
                 Dispatcher.UIThread.Post(ShowHeadphones);
+            Dispatcher.UIThread.Post(SyncMacGlassIsland, DispatcherPriority.Loaded);
 
             if (Program.Options.ExitAfterSeconds is { } seconds)
                 _ = ExitLaterAsync(desktop, seconds, _shutdown.Token);
@@ -182,6 +192,8 @@ public sealed class App : Application
             desktop.Exit += (_, _) =>
             {
                 _shutdown.Cancel();
+                _macGlassIsland?.Dispose();
+                _macGlassIsland = null;
                 _headphones.Dispose();
                 _accessibility?.Stop();
             };
@@ -352,13 +364,26 @@ public sealed class App : Application
             .GetManifestResourceStream("LyricifyIsland.icon.png")
             ?? throw new InvalidOperationException("Embedded tray icon is missing");
         _appIcon = new WindowIcon(iconStream);
+        WindowIcon trayIcon = _appIcon;
+        if (OperatingSystem.IsMacOS())
+        {
+            // Menu bar extras use a template image: the system draws it with the correct
+            // foreground colour for the current menu bar appearance instead of showing the
+            // full-colour app icon.
+            using var templateStream = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream("LyricifyIsland.MacTrayIcon.png")
+                ?? throw new InvalidOperationException("Embedded macOS tray icon is missing");
+            trayIcon = new WindowIcon(templateStream);
+        }
         _trayIcon = new TrayIcon
         {
-            Icon = _appIcon,
+            Icon = trayIcon,
             ToolTipText = "Lyricify Island",
             Menu = menu,
             IsVisible = true
         };
+        if (OperatingSystem.IsMacOS())
+            MacOSProperties.SetIsTemplateIcon(_trayIcon, true);
         _trayIcon.Clicked += (_, _) => Dispatcher.UIThread.Post(ShowLyricsWindow);
     }
 
@@ -528,8 +553,7 @@ public sealed class App : Application
     {
         if (_lyricsWindow is not null)
         {
-            if (_lyricsWindow.WindowState == WindowState.Minimized)
-                _lyricsWindow.WindowState = WindowState.Normal;
+            _lyricsWindow.RestoreFromMinimized();
             _lyricsWindow.Activate();
         }
         else
@@ -543,6 +567,10 @@ public sealed class App : Application
             _accessibility?.Track(_lyricsWindow);
             _lyricsWindow.Closed += (_, _) => _lyricsWindow = null;
             _lyricsWindow.Show();
+            // The menu-bar app is an accessory (LSUIElement) on macOS; opening a window from
+            // the status menu must also bring the app forward or the window stays behind.
+            if (OperatingSystem.IsMacOS())
+                _lyricsWindow.Activate();
         }
         if (panel is { } kind)
             _lyricsWindow.OpenPanel(kind);
@@ -603,6 +631,7 @@ public sealed class App : Application
             _islandMenuItem.IsChecked = settings.ShowIsland;
         RenderScheduling.Apply(settings);
         _overlay?.ApplySettings(_settings);
+        SyncMacGlassIsland();
         _lyricsWindow?.ApplySettings(_settings);
         if (Volatile.Read(ref _playbackSource) is { } source)
         {
@@ -614,6 +643,53 @@ public sealed class App : Application
             && !Program.Options.Demo)
             _ = RestartPlaybackAsync(requestHistoryPermission: restartPlayback);
         return true;
+    }
+
+    private void SyncMacGlassIsland()
+    {
+        if (!OperatingSystem.IsMacOS()
+            || !_settings.AcrylicIsland
+            || !OperatingSystem.IsMacOSVersionAtLeast(26))
+        {
+            _macGlassIsland?.Dispose();
+            _macGlassIsland = null;
+            _overlay?.SetNativeIslandActive(false);
+            return;
+        }
+
+        _macGlassIsland ??= new MacGlassIsland(
+            _store!,
+            _settings,
+            ControlPlaybackAsync,
+            ShowLyricsWindow,
+            ShowBanner,
+            ShowSettings,
+            () =>
+            {
+                if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                    desktop.Shutdown();
+                else
+                    Environment.Exit(0);
+            },
+            UpdateTrackOffset,
+            updated => ApplySettings(updated, restartPlayback: false),
+            NativeGlassIslandFailed);
+        _macGlassIsland.ApplySettings(_settings);
+        if (_macGlassIsland.Start())
+        {
+            _overlay?.SetNativeIslandActive(true);
+            return;
+        }
+        _macGlassIsland.Dispose();
+        _macGlassIsland = null;
+        _overlay?.SetNativeIslandActive(false);
+    }
+
+    private void NativeGlassIslandFailed()
+    {
+        _macGlassIsland?.Dispose();
+        _macGlassIsland = null;
+        _overlay?.SetNativeIslandActive(false);
     }
 
     private bool RefreshCurrentTrack() =>
@@ -660,6 +736,11 @@ public sealed class App : Application
                     return;
                 }
 #endif
+                if (OperatingSystem.IsMacOS())
+                {
+                    StartPlaybackSource(new MacMediaService(_store, _settings.LyricsSource));
+                    return;
+                }
                 StartPlaybackSource(new MprisService(_store, _settings.LyricsSource));
                 return;
             }
@@ -992,6 +1073,7 @@ internal static class SelfCheck
         refreshStore.Update(previousPlayback);
         Require(refreshService.RequestCurrentTrackRefresh(), "refresh current track request");
         CheckMpris();
+        CheckMacMedia();
 #if WINDOWS
         CheckWindowsMedia();
 #endif
@@ -1051,6 +1133,57 @@ internal static class SelfCheck
 
         Console.WriteLine("self-test: ok");
         return 0;
+    }
+
+    private static void CheckMacMedia()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "spotify": {"source":"spotify","running":true,"state":"playing","title":"Song",
+                "artist":"A, B","album":"Album","durationMs":181942,"positionMs":14123,
+                "artworkUrl":"https://example.invalid/cover.jpg","trackId":"spotify:track:1",
+                "shuffle":true,"repeat":"context","volume":0.5},
+              "music": {"source":"music","running":true,"state":"paused","title":"Other",
+                "artist":"C","album":"","durationMs":1000,"positionMs":0,
+                "canFavorite":true,"favorite":true,"shuffle":false,"repeat":"track","volume":1}
+            }
+            """);
+        var spotify = MacMediaService.ParsePlayer(document.RootElement.GetProperty("spotify"));
+        var music = MacMediaService.ParsePlayer(document.RootElement.GetProperty("music"));
+        Require(spotify is not null && music is not null,
+            "macOS bridge payload");
+        var spotifyPlayer = spotify!;
+        var musicPlayer = music!;
+        Require(spotifyPlayer.Title == "Song"
+                && spotifyPlayer.Artists.SequenceEqual(["A", "B"])
+                && spotifyPlayer.DurationMs == 181_942
+                && spotifyPlayer.PositionMs == 14_123
+                && spotifyPlayer.Controls.Shuffle == true
+                && spotifyPlayer.Controls.Repeat == "context"
+                && spotifyPlayer.Controls.Volume is { } volume && Math.Abs(volume - 0.5d) < 0.001d
+                && !spotifyPlayer.Controls.CanFavorite,
+            "macOS Spotify metadata");
+        Require(musicPlayer.Controls.CanFavorite
+                && musicPlayer.Controls.IsFavorite == true
+                && musicPlayer.Controls.Repeat == "track"
+                && musicPlayer.ArtworkUrl is null,
+            "macOS Music favorite and repeat");
+        var pausedSpotify = spotifyPlayer with { IsPlaying = false };
+        var pausedMusic = musicPlayer with { IsPlaying = false };
+        Require(MacMediaService.SelectPlayer([musicPlayer, spotifyPlayer], musicPlayer.Source) == spotifyPlayer
+                && MacMediaService.SelectPlayer([pausedMusic, pausedSpotify], spotifyPlayer.Source)
+                    == pausedSpotify
+                && MacMediaService.SelectPlayer([musicPlayer], "spotify") == musicPlayer,
+            "macOS player selection");
+        Require(PlaybackStore.RequiresAttention("本地播放器 连接失败：test")
+                && !PlaybackStore.RequiresAttention(PlaybackStore.NoActiveMacPlaybackStatus),
+            "macOS connection errors remain visible");
+        var streamingMusic = musicPlayer with { TrackId = "0" };
+        Require(MacMediaService.BuildTrackId(streamingMusic)
+                != MacMediaService.BuildTrackId(streamingMusic with { Title = "Another streaming song" })
+                && MacMediaService.BuildTrackId(streamingMusic)
+                == MacMediaService.BuildTrackId(streamingMusic with { PositionMs = 500 }),
+            "macOS streaming songs without persistent IDs retain distinct stable identities");
     }
 
 #if WINDOWS
@@ -1238,6 +1371,10 @@ internal static class SelfCheck
                     "autostart executable quoting");
                 Require(Autostart.SetEnabled(false) && !File.Exists(autostartPath), "autostart disable");
             }
+            Require(Autostart.LaunchAgent("/tmp/Lyricify & Island")
+                    .Contains("<string>/tmp/Lyricify &amp; Island</string>", StringComparison.Ordinal)
+                    && Autostart.LaunchAgent("/tmp/app").Contains("<key>RunAtLoad</key>", StringComparison.Ordinal),
+                "macOS launch agent escaping");
         }
         finally
         {

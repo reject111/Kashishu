@@ -20,6 +20,8 @@ internal sealed class LyricsWindow : Window
     private readonly PanelHost _panel;
     private NativeOverlay? _inputShape;
     private WindowState _beforeFullScreen = WindowState.Normal;
+    private WindowState _beforeMinimize = WindowState.Normal;
+    private WindowState _lastWindowState = WindowState.Normal;
 
     public LyricsWindow(PlaybackStore store, IslandSettings settings, WindowIcon? icon,
         Func<PlaybackCommand, CancellationToken, Task<string?>> controlPlayback,
@@ -32,10 +34,14 @@ internal sealed class LyricsWindow : Window
         Height = 720;
         MinWidth = 620;
         MinHeight = 500;
-        WindowDecorations = WindowDecorations.None;
+        // Keep AppKit's buttons above our extended content. Its native toolbar aligns
+        // the traffic lights with the app's header without replacing their hit targets.
+        WindowDecorations = OperatingSystem.IsMacOS() ? WindowDecorations.Full : WindowDecorations.None;
         ExtendClientAreaToDecorationsHint = true;
-        TransparencyLevelHint = [WindowTransparencyLevel.Transparent];
-        Background = Brushes.Transparent;
+        if (OperatingSystem.IsMacOS()) ExtendClientAreaTitleBarHeightHint = 0;
+        TransparencyLevelHint = OperatingSystem.IsMacOS()
+            ? [WindowTransparencyLevel.None] : [WindowTransparencyLevel.Transparent];
+        Background = OperatingSystem.IsMacOS() ? new SolidColorBrush(Color.FromRgb(12, 17, 24)) : Brushes.Transparent;
         CanResize = true;
         _lyrics = new LyricsWindowControl(store, settings, controlPlayback, setTranslation, setIslandVisibility, headphones);
         var artBytes = ImmutableArray<byte>.Empty;
@@ -65,6 +71,27 @@ internal sealed class LyricsWindow : Window
         };
         AddHandler(KeyDownEvent, (_, args) =>
         {
+            if (OperatingSystem.IsMacOS())
+            {
+                if (args.KeyModifiers == KeyModifiers.Meta && args.Key == Key.W)
+                {
+                    Close();
+                    args.Handled = true;
+                    return;
+                }
+                if (args.KeyModifiers == KeyModifiers.Meta && args.Key == Key.M)
+                {
+                    WindowState = WindowState.Minimized;
+                    args.Handled = true;
+                    return;
+                }
+                if (args.KeyModifiers == (KeyModifiers.Meta | KeyModifiers.Control) && args.Key == Key.F)
+                {
+                    ToggleFullScreen();
+                    args.Handled = true;
+                    return;
+                }
+            }
             if (args.Key == Key.Escape && _panel.IsOpen)
             {
                 _panel.Close();
@@ -81,8 +108,7 @@ internal sealed class LyricsWindow : Window
                     WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
                     break;
                 case LyricsWindowAction.FullScreen:
-                    if (WindowState == WindowState.FullScreen) WindowState = _beforeFullScreen;
-                    else { _beforeFullScreen = WindowState; WindowState = WindowState.FullScreen; }
+                    ToggleFullScreen();
                     break;
                 case LyricsWindowAction.Pin when !OperatingSystem.IsLinux(): Topmost = !Topmost; break;
                 case LyricsWindowAction.Settings: _panel.Toggle(PanelKind.Settings); break;
@@ -92,7 +118,14 @@ internal sealed class LyricsWindow : Window
         };
         _lyrics.MoveWindow = args =>
         {
-            if (args.ClickCount == 2) _lyrics.WindowAction(LyricsWindowAction.Maximize);
+            if (OperatingSystem.IsMacOS())
+            {
+                if (WindowState == WindowState.FullScreen) return;
+                if (args.ClickCount == 2 && args.GetPosition(_lyrics).Y < MacTitleBar.HeaderHeight)
+                    MacTitleBar.PerformTitleBarDoubleClick(this);
+                else if (args.ClickCount == 1) BeginMoveDrag(args);
+            }
+            else if (args.ClickCount == 2) _lyrics.WindowAction(LyricsWindowAction.Maximize);
             else if (WindowState != WindowState.FullScreen) BeginMoveDrag(args);
         };
         _lyrics.ResizeWindow = (edge, args) =>
@@ -103,6 +136,7 @@ internal sealed class LyricsWindow : Window
         Content = new Grid { Children = { _lyrics, _panel } };
         Opened += (_, _) =>
         {
+            MacTitleBar.Attach(this);
             if (Screens.ScreenFromWindow(this) is { } screen)
             {
                 Width = Math.Min(Width, screen.WorkingArea.Width / screen.Scaling);
@@ -116,11 +150,36 @@ internal sealed class LyricsWindow : Window
         };
         PropertyChanged += (_, args) =>
         {
+            if (args.Property == WindowStateProperty)
+            {
+                if (WindowState == WindowState.FullScreen && _lastWindowState != WindowState.FullScreen)
+                    _beforeFullScreen = _lastWindowState;
+                if (WindowState == WindowState.Minimized && _lastWindowState != WindowState.Minimized)
+                    _beforeMinimize = _lastWindowState;
+                _lastWindowState = WindowState;
+            }
             if (args.Property == WindowStateProperty || args.Property == TopmostProperty || args.Property == IsVisibleProperty)
                 UpdateWindowState();
             if (args.Property == BoundsProperty || args.Property.Name == "RenderScaling") UpdateInputShape();
         };
-        Closed += (_, _) => { store.Changed -= OnPlaybackChanged; _inputShape?.Dispose(); _lyrics.Dispose(); };
+        Closed += (_, _) =>
+        {
+            store.Changed -= OnPlaybackChanged;
+            _inputShape?.Dispose();
+            _lyrics.Dispose();
+        };
+    }
+
+    private void ToggleFullScreen()
+    {
+        if (WindowState == WindowState.FullScreen) WindowState = _beforeFullScreen;
+        else { _beforeFullScreen = WindowState; WindowState = WindowState.FullScreen; }
+    }
+
+    public void RestoreFromMinimized()
+    {
+        if (WindowState == WindowState.Minimized)
+            WindowState = _beforeMinimize;
     }
 
     private void UpdateInputShape()
@@ -133,6 +192,7 @@ internal sealed class LyricsWindow : Window
 
     private void UpdateWindowState()
     {
+        MacTitleBar.UpdateWindowState(this);
         _lyrics.FullScreen = WindowState == WindowState.FullScreen;
         _lyrics.Maximized = WindowState == WindowState.Maximized;
         _lyrics.Pinned = Topmost;
@@ -366,7 +426,8 @@ internal sealed class LyricsWindowControl : Control, IDisposable
         + (_settings.EnableTrackOffsets ? _settings.TrackOffsetFor(trackId) : 0);
 
     private LyricsWindowLayout Layout => _renderer.Layout
-        ?? LyricsWindowLayout.Create((float)Bounds.Width, (float)Bounds.Height, LyricsOnly, FullScreen || Maximized);
+        ?? LyricsWindowLayout.Create((float)Bounds.Width, (float)Bounds.Height, LyricsOnly,
+            OperatingSystem.IsMacOS() || FullScreen || Maximized);
 
     private void OnPressed(object? sender, PointerPressedEventArgs args)
     {
@@ -402,13 +463,15 @@ internal sealed class LyricsWindowControl : Control, IDisposable
             args.Pointer.Capture(this);
             WakeRender();
         }
-        else if (point.Y < 68 || Layout.Cover.Contains(point))
+        else if (point.Y < (OperatingSystem.IsMacOS() ? MacTitleBar.HeaderHeight : 68) || Layout.Cover.Contains(point))
             MoveWindow?.Invoke(args);
         args.Handled = true;
     }
 
     private WindowEdge? ResizeEdge(Point point)
     {
+        // AppKit owns the resize borders; a second, inset resize ring would steal content clicks.
+        if (OperatingSystem.IsMacOS()) return null;
         var left = point.X < 22;
         var right = point.X > Bounds.Width - 22;
         var top = point.Y < 22;
@@ -610,7 +673,7 @@ internal sealed class LyricsWindowControl : Control, IDisposable
             case Key.Escape:
                 if (FullScreen) WindowAction?.Invoke(LyricsWindowAction.FullScreen);
                 else if (_browseScroll.HasValue) _browseScroll = null;
-                else WindowAction?.Invoke(LyricsWindowAction.Close);
+                else if (!OperatingSystem.IsMacOS()) WindowAction?.Invoke(LyricsWindowAction.Close);
                 break;
             case Key.T: Activate(new LyricsWindowHit(LyricsWindowAction.Translation, default)); break;
             case Key.L when args.KeyModifiers.HasFlag(KeyModifiers.Control):
@@ -673,7 +736,7 @@ internal sealed class LyricsWindowDrawOperation : ICustomDrawOperation
 
     public bool HitTest(Point point)
     {
-        if (_frame.FullScreen || _frame.Maximized) return Bounds.Contains(point);
+        if (OperatingSystem.IsMacOS() || _frame.FullScreen || _frame.Maximized) return Bounds.Contains(point);
         var rect = Bounds.Deflate(10);
         if (!rect.Contains(point)) return false;
         const double radius = 24;

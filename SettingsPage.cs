@@ -240,7 +240,9 @@ internal sealed class SettingsPage : PanelPage
             "播放信息源",
             PlatformInfo.IsWindows
                 ? "选择 Spotify Web API 或 Windows 系统媒体会话中的本机播放器"
-                : "选择 Spotify Web API 或本机播放器提供的 MPRIS 信息",
+                : PlatformInfo.IsMacOS
+                    ? "选择 Spotify Web API 或本机 Spotify / Music 的播放信息"
+                    : "选择 Spotify Web API 或本机播放器提供的 MPRIS 信息",
             Ui.Row(Ui.Text("当前来源", 14, Ui.Emphasis),
                 playbackSourceStatus,
                 playbackSource),
@@ -492,6 +494,22 @@ internal sealed class SettingsPage : PanelPage
             Ui.Row("重新获取当前歌曲", "忽略本次缓存结果，重新请求歌词和歌曲信息", refreshAction));
 
         // ── 外观 ────────────────────────────────────────────────────────────────
+        var nativeGlassAvailable = OperatingSystem.IsMacOSVersionAtLeast(26);
+        var backgroundOpacityRow = Ui.Row("背景不透明度",
+            nativeGlassAvailable
+                ? "兼容渲染的背景强度；Liquid Glass 由系统材质和外观决定"
+                : "降低后更容易融入桌面，但文字仍保持清晰",
+            Ui.Slider("岛屿背景不透明度百分比",
+                SettingsStore.MinimumBackgroundOpacityPercent,
+                SettingsStore.MaximumBackgroundOpacityPercent,
+                settings.BackgroundOpacityPercent,
+                5,
+                value => $"{value:0}%",
+                value => Commit(settings with
+                {
+                    BackgroundOpacityPercent = SettingsStore.NormalizeBackgroundOpacityPercent(value)
+                })));
+        backgroundOpacityRow.IsVisible = !(nativeGlassAvailable && settings.AcrylicIsland);
         List<Control> appearanceRows =
         [
             Ui.Row("整体缩放", "同步缩放字体、图标、胶囊、间距和光效",
@@ -518,17 +536,7 @@ internal sealed class SettingsPage : PanelPage
                     {
                         WidthPercent = SettingsStore.NormalizeWidthPercent(value)
                     }))),
-            Ui.Row("背景不透明度", "降低后更容易融入桌面，但文字仍保持清晰",
-                Ui.Slider("岛屿背景不透明度百分比",
-                    SettingsStore.MinimumBackgroundOpacityPercent,
-                    SettingsStore.MaximumBackgroundOpacityPercent,
-                    settings.BackgroundOpacityPercent,
-                    5,
-                    value => $"{value:0}%",
-                    value => Commit(settings with
-                    {
-                        BackgroundOpacityPercent = SettingsStore.NormalizeBackgroundOpacityPercent(value)
-                    })))
+            backgroundOpacityRow
         ];
 
         // 系统的 Acrylic / Mica 材质由 DWM 绘制整个窗口矩形，不会被窗口区域裁成胶囊，
@@ -554,7 +562,22 @@ internal sealed class SettingsPage : PanelPage
                         value => Commit(settings with { AcrylicFrameRate = value }))));
             }
         }
-        else
+        else if (OperatingSystem.IsMacOS())
+        {
+            if (OperatingSystem.IsMacOSVersionAtLeast(26))
+            {
+                appearanceRows.Add(Ui.Row("启用 Liquid Glass 效果",
+                    "使用系统玻璃材质与柔和的歌词失焦过渡，跟随系统外观；关闭后回到兼容渲染",
+                    Switch("启用 Liquid Glass 效果", settings.AcrylicIsland, value =>
+                    {
+                        if (!Commit(settings with { AcrylicIsland = value }))
+                            return false;
+                        backgroundOpacityRow.IsVisible = !value;
+                        return true;
+                    })));
+            }
+        }
+        else if (OperatingSystem.IsLinux())
         {
             appearanceRows.Add(Ui.Row("背景模糊", "在支持背景模糊协议的 Wayland 桌面上模糊岛屿后方",
                 Switch("岛屿背景模糊", settings.BackgroundBlur,
@@ -646,7 +669,7 @@ internal sealed class SettingsPage : PanelPage
                 settings.RightIconAction,
                 IslandIconAction.Favorite,
                 value => Commit(settings with { RightIconAction = value })));
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             positionSection.Children.Add(Ui.Group(Ui.Row("鼠标穿透", "整个岛屿不接收鼠标操作，可从设置中关闭",
                 Switch("岛屿鼠标穿透", settings.ClickThrough,
                     value => Commit(settings with { ClickThrough = value })))));
@@ -669,7 +692,11 @@ internal sealed class SettingsPage : PanelPage
                     [(2, "2 秒"), (5, "5 秒"), (10, "10 秒"), (30, "30 秒")],
                     settings.TemporaryHideSeconds,
                     value => Commit(settings with { TemporaryHideSeconds = value }))),
-            Ui.Row("登录后自动启动", PlatformInfo.IsWindows ? "添加到当前用户的 Windows 启动项" : "使用桌面环境的自启动目录",
+            Ui.Row("登录后自动启动", PlatformInfo.IsWindows
+                    ? "添加到当前用户的 Windows 启动项"
+                    : PlatformInfo.IsMacOS
+                        ? "添加到当前用户的登录项（LaunchAgents）"
+                        : "使用桌面环境的自启动目录",
                 Switch("登录后自动启动", settings.StartOnLogin,
                     value => Commit(settings with { StartOnLogin = value }))));
 

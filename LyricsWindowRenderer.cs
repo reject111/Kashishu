@@ -44,7 +44,9 @@ internal sealed record LyricsWindowLayout(Rect Surface, Rect Lyrics, Rect Cover,
     {
         var compact = width < 840 || height < 580;
         var playerScale = compact ? 1 : Math.Clamp(Math.Min(width / 1120, height / 720), 1, 2);
-        var surface = fillWindow ? new Rect(0, 0, width, height) : new Rect(10, 10, width - 20, height - 20);
+        var surface = fillWindow
+            ? new Rect(0, 0, width, height)
+            : new Rect(10, 10, width - 20, height - 20);
         if (compact || lyricsOnly)
         {
             var margin = lyricsOnly ? Math.Clamp(width * .14, 48, 180) : 48;
@@ -201,7 +203,7 @@ internal sealed class LyricsWindowRenderer : IDisposable
             _frameDelta = dt;
             _lastSeconds = frame.Seconds;
             _controlsAnimating = false;
-            var fillWindow = frame.FullScreen || frame.Maximized;
+            var fillWindow = OperatingSystem.IsMacOS() || frame.FullScreen || frame.Maximized;
             var normal = LyricsWindowLayout.Create(width, height, false, fillWindow);
             var lyricsOnly = LyricsWindowLayout.Create(width, height, true, fillWindow);
             var target = frame.LyricsOnly ? 1d : 0;
@@ -469,12 +471,16 @@ internal sealed class LyricsWindowRenderer : IDisposable
 
     private void DrawHeader(SKCanvas canvas, float width, LyricsWindowFrame frame)
     {
+        var headerOffset = OperatingSystem.IsMacOS() ? -10 : 0;
         var x = width - 42;
-        HeaderButton(LyricsWindowAction.Close, "close", "关闭", false);
-        HeaderButton(LyricsWindowAction.Maximize, frame.Maximized ? "restore" : "maximize", "最大化", false);
-        HeaderButton(LyricsWindowAction.Minimize, "minimize", "最小化", false);
-        x -= 16;
-        HeaderButton(LyricsWindowAction.FullScreen, "fullscreen", "全屏", frame.FullScreen);
+        if (!OperatingSystem.IsMacOS())
+        {
+            HeaderButton(LyricsWindowAction.Close, "close", "关闭", false);
+            HeaderButton(LyricsWindowAction.Maximize, frame.Maximized ? "restore" : "maximize", "最大化", false);
+            HeaderButton(LyricsWindowAction.Minimize, "minimize", "最小化", false);
+            x -= 16;
+            HeaderButton(LyricsWindowAction.FullScreen, "fullscreen", "全屏", frame.FullScreen);
+        }
         if (!OperatingSystem.IsLinux())
             HeaderButton(LyricsWindowAction.Pin, "pin", "置顶", frame.Pinned);
         HeaderButton(LyricsWindowAction.LyricsOnly, "lyrics", "纯歌词", frame.LyricsOnly);
@@ -486,12 +492,13 @@ internal sealed class LyricsWindowRenderer : IDisposable
             brandOpacity = DrawHeadphoneButton(canvas, frame, headphones, x);
         else
             _headphoneExpansion = _headphoneNoiseExpansion = 0;
-        Label(canvas, "Lyricify", 36, 27, 14, White((byte)(165 * brandOpacity)), 160, true);
+        Label(canvas, "Lyricify", OperatingSystem.IsMacOS() ? 96 : 36, 27 + headerOffset, 14,
+            White((byte)(165 * brandOpacity)), 160, true);
         return;
 
         void HeaderButton(LyricsWindowAction action, string icon, string label, bool active)
         {
-            var bounds = new Rect(x - 16, 22, 32, 30);
+            var bounds = new Rect(x - 16, 22 + headerOffset, 32, 30);
             Button(canvas, action, bounds, icon, frame, true, active, 15);
             var tooltipOpacity = _buttonMotion[action].Hover;
             if (tooltipOpacity > .01)
@@ -499,7 +506,7 @@ internal sealed class LyricsWindowRenderer : IDisposable
                 using var paint = Paint(new SKColor(16, 20, 28, (byte)(225 * tooltipOpacity)));
                 var tooltipWidth = Math.Max(66, GetLabel(label, 11, width - 40).InkBounds.Width + 24);
                 var tooltipLeft = Math.Clamp(x - tooltipWidth / 2, 16, width - tooltipWidth - 16);
-                var tooltip = new SKRect(tooltipLeft, 56, tooltipLeft + tooltipWidth, 82);
+                var tooltip = new SKRect(tooltipLeft, 56 + headerOffset, tooltipLeft + tooltipWidth, 82 + headerOffset);
                 canvas.DrawRoundRect(tooltip, 8, 8, paint);
                 CenteredLabel(canvas, label, tooltip, 11, White((byte)(210 * tooltipOpacity)));
             }

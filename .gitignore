@@ -10,6 +10,15 @@ TestResults/
 dist/
 .dotnet/
 
+# Native macOS build output
+.build/
+.swiftpm/
+DerivedData/
+*.dSYM/
+*.xcuserstate
+xcuserdata/
+*.glass-tmp
+
 # IDE and editor state
 .vs/
 .vscode/
