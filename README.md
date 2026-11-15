@@ -1,6 +1,6 @@
 # Kashishu
 
-**原项目由 AI 编写，由大肥鱼完成 Windows/macOS 平台适配**
+**原项目由 AI 编写，由大肥鱼完成 Windows 适配**
 
 Windows / Linux 桌面歌词岛。当前曲目和播放进度可来自 Spotify Web API 或本机播放器
 （Windows 使用系统媒体会话 SMTC，Linux 使用 MPRIS）；逐字歌词与翻译通过
