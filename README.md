@@ -21,6 +21,10 @@ sudo dnf install kashishu
 
 安装后可从应用菜单启动 Kashishu，也可运行 `Kashishu`。RPM 使用系统的 .NET 运行时和 OpenCC；仓库会在 GitHub 的 main 分支推送后重新构建。
 
+旧版 `lyricify-island` 会升级为 `kashishu`。原配置仍保存在 `${XDG_CONFIG_HOME:-$HOME/.config}/lyricify-island`，
+Spotify 授权仍保存在 `${XDG_STATE_HOME:-$HOME/.local/state}/lyricify-island`；如需继续使用，请在首次启动前分别复制到同一父目录下的 `kashishu` 目录。
+升级后首次启动 Kashishu，并在设置中确认登录自启动。
+
 ## 首次运行
 
 1. 在 [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) 的应用设置中加入回调地址：

@@ -27,6 +27,8 @@ License:        MIT AND Apache-2.0 AND GPL-3.0-or-later
 URL:            https://github.com/xiaozhangup/Kashishu
 BuildArch:      x86_64
 Requires:       libwayland-client, libglvnd-egl
+Provides:       lyricify-island = %{version}-%{release}
+Obsoletes:      lyricify-island < 0.1.14
 
 %description
 Wayland desktop lyrics island for Spotify and local MPRIS players.

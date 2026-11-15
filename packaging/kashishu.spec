@@ -17,6 +17,8 @@ Requires:       dotnet-runtime-10.0
 Requires:       libwayland-client
 Requires:       libglvnd-egl
 Requires:       opencc
+Provides:       lyricify-island = %{version}-%{release}
+Obsoletes:      lyricify-island < 0.1.14
 ExclusiveArch:  x86_64
 
 %description
