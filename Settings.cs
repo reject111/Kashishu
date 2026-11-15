@@ -39,7 +39,8 @@ internal enum IslandIconAction
     Previous,
     Next,
     Banner,
-    TemporaryHide
+    TemporaryHide,
+    CopyLink
 }
 
 internal enum LyricsLiftMode

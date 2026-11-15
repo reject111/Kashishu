@@ -118,7 +118,8 @@ internal sealed class MprisService : IPlaybackSource
         var forceRefresh = Interlocked.Exchange(ref _refreshCurrentTrack, 0) != 0;
         var currentTrack = Volatile.Read(ref _track);
         if (forceRefresh || !SameMetadata(currentTrack, player.Track)
-            || currentTrack?.AlbumArtUrl != player.Track.AlbumArtUrl)
+            || currentTrack?.AlbumArtUrl != player.Track.AlbumArtUrl
+            || currentTrack?.ShareUrl != player.Track.ShareUrl)
         {
             CancelTrackLoad();
             var reusableTrack = currentTrack?.Id == player.Track.Id
@@ -134,7 +135,11 @@ internal sealed class MprisService : IPlaybackSource
                 player.Track.DurationMs,
                 [],
                 []);
-            currentTrack = currentTrack with { AlbumArtUrl = player.Track.AlbumArtUrl };
+            currentTrack = currentTrack with
+            {
+                AlbumArtUrl = player.Track.AlbumArtUrl,
+                ShareUrl = player.Track.ShareUrl
+            };
             Volatile.Write(ref _track, currentTrack);
             Volatile.Write(ref _loadingTrack, currentTrack);
             _store.Update(Snapshot(player, currentTrack, reportedAt));
@@ -488,9 +493,14 @@ internal sealed class MprisService : IPlaybackSource
             albumArtists = artists;
         var album = String(metadata, "xesam:album")?.Trim() ?? string.Empty;
         var durationMs = MicrosecondsToMilliseconds(Int64(metadata, "mpris:length"));
-        var url = String(metadata, "xesam:url");
+        var url = String(metadata, "xesam:url")?.Trim();
         var trackPath = ObjectPath(metadata, "mpris:trackid");
         var id = BuildTrackId(service, url, trackPath, title, artists, album, durationMs);
+        var shareUrl = url?.StartsWith("spotify:track:", StringComparison.Ordinal) == true
+            ? SongBanner.SpotifyUrl(url, PlaybackSourcePreference.Spotify)
+            : Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                    ? uri.AbsoluteUri : null;
         return new SourceTrack(
             id,
             title,
@@ -500,7 +510,10 @@ internal sealed class MprisService : IPlaybackSource
             album,
             durationMs,
             null,
-            String(metadata, "mpris:artUrl"));
+            String(metadata, "mpris:artUrl"))
+        {
+            ShareUrl = shareUrl
+        };
     }
 
     internal static Player? SelectPlayer(IReadOnlyList<Player> players, string? selectedService) =>

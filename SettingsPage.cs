@@ -590,6 +590,7 @@ internal sealed class SettingsPage : PanelPage
             (IslandIconAction.Previous, "上一首"),
             (IslandIconAction.Next, "下一首"),
             (IslandIconAction.Banner, "分享图"),
+            (IslandIconAction.CopyLink, "复制链接"),
             (IslandIconAction.TemporaryHide, "临时隐藏")
         };
 

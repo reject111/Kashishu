@@ -69,6 +69,7 @@ internal sealed class TrackPrefetcher
                         TrackCache.SaveIfChanged(track with
                         {
                             AlbumArtUrl = source.AlbumArtUrl,
+                            ShareUrl = source.ShareUrl,
                             AlbumArtBytes = TrackCache.PreferLargerImage(track.AlbumArtBytes, await albumTask),
                             ArtistImageBytes = await artistsTask,
                             Lyrics = lyrics.IsDefaultOrEmpty ? track.Lyrics : lyrics,
