@@ -1,8 +1,42 @@
+# Local secrets and configuration
 .env
-.dotnet/
-.idea/
-.codex/
+
+# .NET build output
 bin/
 obj/
+artifacts/
+publish/
+TestResults/
 dist/
+.dotnet/
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+.codex/
 *.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+*.swp
+*.swo
+*~
+
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs, crash dumps and temporary files
+*.log
+*.dmp
+*.tmp
+*.pid
+*.bak
+*.orig
+*.rej
+
+# Local code-review notes
+docs/code-review*.md

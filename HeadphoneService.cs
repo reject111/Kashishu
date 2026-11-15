@@ -31,6 +31,10 @@ internal sealed partial class HeadphoneService : IDisposable
     private Task _bluetoothMonitor = Task.CompletedTask;
     private bool _disposed;
 
+    /// <summary>Bluetooth headphone control is implemented on top of BlueZ and RFCOMM sockets,
+    /// which only exist on Linux.</summary>
+    public static bool IsSupported => OperatingSystem.IsLinux();
+
     public event EventHandler? StateChanged;
     public IReadOnlyList<HeadphoneDevice> Devices { get; private set; } = [];
     public HeadphoneDevice? SelectedDevice { get; private set; }
@@ -42,6 +46,12 @@ internal sealed partial class HeadphoneService : IDisposable
 
     public async Task InitializeAsync()
     {
+        if (!IsSupported)
+        {
+            StatusMessage = "耳机控制目前仅支持 Linux";
+            Publish();
+            return;
+        }
         await PerformAsync(async () =>
         {
             if (File.Exists(_settingsPath))

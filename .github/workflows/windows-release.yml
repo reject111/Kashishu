@@ -1,0 +1,68 @@
+name: Windows installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content LyricifyIsland.csproj
+          $version = ($project.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1)
+          if (-not $version) { throw 'Version missing from LyricifyIsland.csproj' }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: ./build-installer.ps1 -Version $env:VERSION
+
+      - name: Self test
+        shell: pwsh
+        run: ./dist/LyricifyIsland.exe --self-test
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LyricifyIsland-${{ env.VERSION }}-build.${{ github.run_number }}
+          path: |
+            dist/LyricifyIsland-Setup-*.exe
+            dist/LyricifyIsland.exe
+          if-no-files-found: error
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}-build.${{ github.run_number }}
+          name: Lyricify Island ${{ env.VERSION }} (build ${{ github.run_number }})
+          body: |
+            Windows 安装包由 GitHub Actions 自动构建。
+
+            - 安装版：`LyricifyIsland-Setup-${{ env.VERSION }}.exe`（当前用户目录，无需管理员权限）
+            - 便携版：`LyricifyIsland.exe`（单个可执行文件，自带运行时）
+
+            提交：${{ github.sha }}
+          files: |
+            dist/LyricifyIsland-Setup-*.exe
+            dist/LyricifyIsland.exe
+          make_latest: true

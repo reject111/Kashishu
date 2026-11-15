@@ -634,17 +634,21 @@ internal sealed class SpotifyService : IPlaybackSource
 
     internal static int ReadSpotifyCrossfadeMs()
     {
-        var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        if (string.IsNullOrWhiteSpace(configHome) || !Path.IsPathRooted(configHome))
-            configHome = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
-        var users = Path.Combine(configHome, "spotify", "Users");
-        if (!Directory.Exists(users))
+        // Linux keeps account preferences under ~/.config/spotify/Users; the Windows client
+        // stores a single prefs file in %APPDATA%\Spotify.
+        var users = Path.Combine(AppPaths.ConfigHome(), "spotify", "Users");
+        var windowsPrefs = Path.Combine(AppPaths.ConfigHome(), "Spotify", "prefs");
+        var paths = new List<string>();
+        if (Directory.Exists(users))
+            paths.AddRange(Directory.EnumerateFiles(users, "prefs", SearchOption.AllDirectories));
+        if (File.Exists(windowsPrefs))
+            paths.Add(windowsPrefs);
+        if (paths.Count == 0)
             return 0;
 
         try
         {
-            foreach (var path in Directory.EnumerateFiles(users, "prefs", SearchOption.AllDirectories))
+            foreach (var path in paths)
             {
                 var crossfadeMs = ParseSpotifyCrossfadeMs(File.ReadAllText(path));
                 if (crossfadeMs > 0)
@@ -804,8 +808,18 @@ internal sealed class SpotifyService : IPlaybackSource
 
                 if (query.TryGetValue("error", out var error))
                 {
-                    await ReplyAsync(stream, 400, "Bad Request", "Spotify 授权已取消，可以关闭此页。", cancellationToken);
-                    throw new InvalidOperationException($"Spotify 授权失败：{error}");
+                    var detail = query.TryGetValue("error_description", out var description)
+                                 && !string.IsNullOrWhiteSpace(description)
+                        ? $"{error}：{description}"
+                        : error;
+                    // The reason is shown on the callback page as well: it is the only place the
+                    // user sees it while the authorization is failing.
+                    await ReplyAsync(stream, 400, "Bad Request",
+                        $"Spotify 授权未完成（{detail}），可以关闭此页。{AuthorizationHint(error)}",
+                        cancellationToken);
+                    Console.Error.WriteLine($"[spotify] authorization failed: {detail}");
+                    throw new InvalidOperationException(
+                        $"Spotify 授权页返回 {detail}。{AuthorizationHint(error)}");
                 }
 
                 if (!query.TryGetValue("code", out var code) || string.IsNullOrWhiteSpace(code))
@@ -1125,6 +1139,21 @@ internal sealed class SpotifyService : IPlaybackSource
         return true;
     }
 
+    /// <summary>Explains what the user can do about an authorization error Spotify sent back.</summary>
+    private static string AuthorizationHint(string error) => error switch
+    {
+        "access_denied" =>
+            "授权页面上需要点击同意；如果应用还在开发模式，请先在 Developer Dashboard 的 User Management "
+            + "里把当前 Spotify 账号加进去。",
+        "invalid_scope" =>
+            "应用申请了当前账号不可用的权限，请确认 Client ID 属于自己创建的应用。",
+        "invalid_client" =>
+            "Client ID 与 Client Secret 可能填反或已失效，请在 Developer Dashboard 重新复制。",
+        _ =>
+            $"请确认 Client ID 与 Client Secret 没有填反，并在 Developer Dashboard 中把 Redirect URI "
+            + $"设置为 {RedirectUri}。"
+    };
+
     private static async Task ReplyAsync(
         NetworkStream stream,
         int code,
@@ -1165,14 +1194,8 @@ internal sealed class SpotifyService : IPlaybackSource
         _store.Update(snapshot with { Status = status });
     }
 
-    private static string TokenPath()
-    {
-        var stateHome = Environment.GetEnvironmentVariable("XDG_STATE_HOME");
-        if (string.IsNullOrWhiteSpace(stateHome) || !Path.IsPathRooted(stateHome))
-            stateHome = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "state");
-        return Path.Combine(stateHome, "lyricify-island", "spotify-token.json");
-    }
+    private static string TokenPath() =>
+        Path.Combine(AppPaths.StateHome(), "lyricify-island", "spotify-token.json");
 
     private static void Secure(string path, UnixFileMode mode)
     {
@@ -1229,7 +1252,7 @@ internal sealed class SpotifyService : IPlaybackSource
     private static string Friendly(Exception exception)
     {
         var message = exception.Message.Split('\n', '\r')[0].Trim();
-        return message.Length <= 160 ? message : message[..160];
+        return message.Length <= 300 ? message : message[..300];
     }
 
     private sealed record Credentials(string ClientId, string ClientSecret);

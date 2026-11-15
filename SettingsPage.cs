@@ -1,7 +1,9 @@
 using Avalonia;
 using System.Diagnostics;
+using Avalonia.Animation;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -10,6 +12,15 @@ namespace LyricifyIsland;
 
 internal sealed class SettingsPage : PanelPage
 {
+    // The header and tray can change these fields while this cached page is open.
+    internal static IslandSettings MergeExternalSettings(
+        IslandSettings updated, IslandSettings baseline, IslandSettings latest) => updated with
+    {
+        ShowIsland = latest.ShowIsland,
+        ShowTranslation = updated.ShowTranslation != baseline.ShowTranslation
+            ? updated.ShowTranslation : latest.ShowTranslation
+    };
+
     private const string SlidersIcon = "M3 6V8H14V6H3M18 4V6H21V8H18V10H16V4H18M3 16V18H6V20H8V14H6V16H3M10 16V18H21V16H10Z";
     private const string ScaleIcon = "M7 14H5V19H10V17H7V14M5 10H7V7H10V5H5V10M17 17H14V19H19V14H17V17M14 5V7H17V10H19V5H14Z";
     private const string MusicIcon = "M12 3V13.55A4 4 0 1 0 14 17V7H20V3H12Z";
@@ -25,9 +36,12 @@ internal sealed class SettingsPage : PanelPage
     }
 
     private Action? _onShown;
+    private Action? _synchronizeExternal;
     private IReadOnlyList<Control> _entrance = [];
 
     public override void OnShown() => _onShown?.Invoke();
+
+    public void SynchronizeExternalSettings() => _synchronizeExternal?.Invoke();
 
     public override IReadOnlyList<Control> EntranceTargets => _entrance;
 
@@ -35,9 +49,11 @@ internal sealed class SettingsPage : PanelPage
         IslandSettings initialSettings,
         Func<IslandSettings, bool, bool> settingsChanged,
         Func<IslandSettings> currentSettings,
-        Func<bool> refreshCurrentTrack)
+        Func<bool> refreshCurrentTrack,
+        Func<PlaybackSnapshot?> currentSnapshot)
     {
         var settings = SettingsStore.Normalize(initialSettings);
+        var synchronizing = false;
 
         bool Commit(
             IslandSettings updated,
@@ -45,7 +61,7 @@ internal sealed class SettingsPage : PanelPage
             bool trackOffsetsChanged = false)
         {
             var latest = currentSettings();
-            updated = updated with { ShowIsland = latest.ShowIsland };
+            updated = MergeExternalSettings(updated, settings, latest);
             if (!trackOffsetsChanged)
             {
                 updated = updated with
@@ -69,20 +85,33 @@ internal sealed class SettingsPage : PanelPage
             return segmented;
         }
 
-        ToggleSwitch Switch(string name, bool value, Action<bool> changed)
+        ToggleSwitch Switch(string name, bool value, Func<bool, bool> changed)
         {
             var toggle = Ui.Toggle(name, value);
-            toggle.IsCheckedChanged += (_, _) => changed(toggle.IsChecked == true);
+            toggle.IsCheckedChanged += (_, _) =>
+            {
+                if (synchronizing)
+                    return;
+                if (!changed(toggle.IsChecked == true))
+                {
+                    synchronizing = true;
+                    toggle.IsChecked = toggle.IsChecked != true;
+                    synchronizing = false;
+                }
+            };
             return toggle;
         }
 
         // ── 播放信息源 ────────────────────────────────────────────────────────────
-        var clientId = Ui.Input("Spotify Client ID", "Spotify Developer Dashboard 中的 Client ID", settings.SpotifyClientId);
-        var clientSecret = Ui.Input("Spotify Client Secret", "Spotify Developer Dashboard 中的 Client Secret",
+        var clientId = Ui.Input("Spotify Client ID", "粘贴 Client ID", settings.SpotifyClientId);
+        var clientSecret = Ui.Input("Spotify Client Secret", "粘贴 Client Secret",
             settings.SpotifyClientSecret, password: true);
         var credentialStatus = Ui.Text(string.Empty, 12, muted: true);
         credentialStatus.VerticalAlignment = VerticalAlignment.Center;
         var saveCredentials = Ui.Button("保存并重新连接", accent: true);
+        var connectionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        EventHandler? connectionTick = null;
+        DetachedFromVisualTree += (_, _) => connectionTimer.Stop();
         saveCredentials.Click += (_, _) =>
         {
             var id = clientId.Text?.Trim() ?? string.Empty;
@@ -93,6 +122,12 @@ internal sealed class SettingsPage : PanelPage
                 return;
             }
 
+            if (id.Length > 0 && (id.Length != 32 || !id.All(Uri.IsHexDigit)))
+            {
+                credentialStatus.Text = "Client ID 应为 32 位十六进制字符，请检查是否与 Client Secret 填反";
+                return;
+            }
+
             var updated = settings with { SpotifyClientId = id, SpotifyClientSecret = secret };
             if (!Commit(updated, restartPlayback: true))
             {
@@ -100,10 +135,64 @@ internal sealed class SettingsPage : PanelPage
                 return;
             }
 
-            credentialStatus.Text = updated.HasSpotifyCredentials
-                ? "已保存，正在重新连接 Spotify…"
-                : "已清除 Spotify 参数";
+            if (!updated.HasSpotifyCredentials)
+            {
+                credentialStatus.Text = "已清除 Spotify 参数";
+                return;
+            }
+
+            // The service connects in the background, so the note follows the status it reports
+            // instead of staying on "正在重新连接" forever.
+            credentialStatus.Text = "已保存，正在重新连接 Spotify…";
+            TrackSpotifyConnection();
         };
+
+        void TrackSpotifyConnection()
+        {
+            connectionTimer.Stop();
+            var waited = TimeSpan.Zero;
+            // Replace the callback so repeated saves never leave competing status timers.
+            if (connectionTick is not null)
+                connectionTimer.Tick -= connectionTick;
+            connectionTick = (_, _) =>
+            {
+                waited += connectionTimer.Interval;
+                if (currentSettings().PlaybackSource != PlaybackSourcePreference.Spotify)
+                {
+                    connectionTimer.Stop();
+                    credentialStatus.Text = string.Empty;
+                    return;
+                }
+                if (currentSnapshot() is { } snapshot)
+                {
+                    var status = snapshot.Status ?? string.Empty;
+                    if (snapshot.Track is not null && !PlaybackStore.RequiresAttention(status))
+                    {
+                        credentialStatus.Text = "已连接 Spotify";
+                        connectionTimer.Stop();
+                        return;
+                    }
+                    if (status.Contains("失败", StringComparison.Ordinal)
+                        || status.Contains("授权", StringComparison.Ordinal)
+                            && !status.StartsWith("正在等待", StringComparison.Ordinal)
+                        || status.Contains("HTTP", StringComparison.Ordinal))
+                    {
+                        credentialStatus.Text = status;
+                        connectionTimer.Stop();
+                        return;
+                    }
+                    if (!string.IsNullOrWhiteSpace(status))
+                        credentialStatus.Text = status;
+                }
+                if (waited >= TimeSpan.FromSeconds(20))
+                {
+                    credentialStatus.Text = "仍在连接，详细信息请查看岛屿上的状态";
+                    connectionTimer.Stop();
+                }
+            };
+            connectionTimer.Tick += connectionTick;
+            connectionTimer.Start();
+        }
         var credentialActions = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("*,12,Auto"),
@@ -116,7 +205,7 @@ internal sealed class SettingsPage : PanelPage
             Spacing = 8,
             Children =
             {
-                Ui.Text("Spotify 应用参数", 14, FontWeight.SemiBold),
+                Ui.Text("Spotify 应用参数", 14, Ui.Emphasis),
                 Ui.Text("在 Spotify Developer Dashboard 创建应用后填写，密钥只保存在本机。", 12, muted: true),
                 Ui.Text("Client ID", 12, FontWeight.Medium, true),
                 clientId,
@@ -129,7 +218,7 @@ internal sealed class SettingsPage : PanelPage
         var playbackSourceChoices = new[]
         {
             (PlaybackSourcePreference.Spotify, "Spotify"),
-            (PlaybackSourcePreference.Mpris, "本地 MPRIS")
+            (PlaybackSourcePreference.Mpris, PlatformInfo.LocalPlaybackSourceName)
         };
         var playbackSourceStatus = Ui.Text(string.Empty, 12, muted: true);
         var playbackSource = new Segmented<PlaybackSourcePreference>("播放信息源");
@@ -149,14 +238,16 @@ internal sealed class SettingsPage : PanelPage
         };
         var playbackSection = Ui.Section(
             "播放信息源",
-            "选择 Spotify Web API 或本机播放器提供的 MPRIS 信息",
-            Ui.Row(Ui.Text("当前来源", 14, FontWeight.SemiBold),
+            PlatformInfo.IsWindows
+                ? "选择 Spotify Web API 或 Windows 系统媒体会话中的本机播放器"
+                : "选择 Spotify Web API 或本机播放器提供的 MPRIS 信息",
+            Ui.Row(Ui.Text("当前来源", 14, Ui.Emphasis),
                 playbackSourceStatus,
                 playbackSource),
             spotifyForm);
 
         // ── 歌词 ────────────────────────────────────────────────────────────────
-        var trackOffsetManagerTitle = Ui.Text(string.Empty, 14, FontWeight.SemiBold);
+        var trackOffsetManagerTitle = Ui.Text(string.Empty, 14, Ui.Emphasis);
         var trackOffsetList = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
         trackOffsetList.IsVisible = false;
         var trackOffsetManagerIndicator = Ui.Text("▾", 15, muted: true);
@@ -247,7 +338,7 @@ internal sealed class SettingsPage : PanelPage
                     CornerRadius = new CornerRadius(10),
                     Foreground = LyricsTheme.PrimaryText,
                     FontSize = 14,
-                    FontWeight = FontWeight.SemiBold,
+                    FontWeight = Ui.Emphasis,
                     TextAlignment = TextAlignment.Right,
                     VerticalContentAlignment = VerticalAlignment.Center
                 };
@@ -338,8 +429,10 @@ internal sealed class SettingsPage : PanelPage
 
         var enableTrackOffsets = Switch("启用每首歌曲歌词偏移", settings.EnableTrackOffsets, value =>
         {
-            if (Commit(settings with { EnableTrackOffsets = value }))
-                RefreshTrackOffsetManager();
+            if (!Commit(settings with { EnableTrackOffsets = value }))
+                return false;
+            RefreshTrackOffsetManager();
+            return true;
         });
         RefreshTrackOffsetManager();
         var refreshStatus = Ui.Text(string.Empty, 12, muted: true);
@@ -355,12 +448,21 @@ internal sealed class SettingsPage : PanelPage
             Children = { refreshStatus, refreshTrack }
         };
 
+        var translationToggle = Switch("显示歌词翻译", settings.ShowTranslation,
+            value => Commit(settings with { ShowTranslation = value }));
+        _synchronizeExternal = () =>
+        {
+            var latest = currentSettings();
+            settings = settings with { ShowTranslation = latest.ShowTranslation, ShowIsland = latest.ShowIsland };
+            synchronizing = true;
+            translationToggle.IsChecked = latest.ShowTranslation;
+            synchronizing = false;
+        };
         var lyricsSection = Ui.Section(
             "歌词",
             "控制歌词内容和时间同步",
             Ui.Row("显示翻译", "有翻译时在原文下方显示",
-                Switch("显示歌词翻译", settings.ShowTranslation,
-                    value => Commit(settings with { ShowTranslation = value }))),
+                translationToggle),
             Ui.Row("英文整词特效", "开启后英文歌词按整个单词产生跳字与发光特效，而非逐个字母",
                 Switch("英文整词特效", settings.EnglishWordEffects,
                     value => Commit(settings with { EnglishWordEffects = value }))),
@@ -390,9 +492,8 @@ internal sealed class SettingsPage : PanelPage
             Ui.Row("重新获取当前歌曲", "忽略本次缓存结果，重新请求歌词和歌曲信息", refreshAction));
 
         // ── 外观 ────────────────────────────────────────────────────────────────
-        var appearanceSection = Ui.Section(
-            "外观",
-            "调整岛屿的尺寸和背景",
+        List<Control> appearanceRows =
+        [
             Ui.Row("整体缩放", "同步缩放字体、图标、胶囊、间距和光效",
                 Ui.Slider("岛屿整体缩放百分比",
                     SettingsStore.MinimumScalePercent,
@@ -404,7 +505,9 @@ internal sealed class SettingsPage : PanelPage
                     {
                         ScalePercent = SettingsStore.NormalizeScalePercent(value)
                     }))),
-            Ui.Row("最大宽度", "按可用显示器的宽度计算",
+            // 岛屿按内容收窄，这个值只是上限：只有歌词或翻译比它更长时才会开始滚动，
+            // 所以普通长度的歌词下拖动滑块时胶囊宽度不会变化。
+            Ui.Row("最大宽度", "歌词或翻译比这个宽度更长时才会滚动，岛屿本身随内容收窄；按可用显示器的宽度计算",
                 Ui.Slider("岛屿最大宽度百分比",
                     SettingsStore.MinimumWidthPercent,
                     SettingsStore.MaximumWidthPercent,
@@ -425,10 +528,40 @@ internal sealed class SettingsPage : PanelPage
                     value => Commit(settings with
                     {
                         BackgroundOpacityPercent = SettingsStore.NormalizeBackgroundOpacityPercent(value)
-                    }))),
-            Ui.Row("背景模糊", "在支持背景模糊协议的 Wayland 桌面上模糊岛屿后方",
+                    })))
+        ];
+
+        // 系统的 Acrylic / Mica 材质由 DWM 绘制整个窗口矩形，不会被窗口区域裁成胶囊，
+        // 于是这里改为自行截取岛屿后方的桌面并模糊，再裁到胶囊里。
+        if (OperatingSystem.IsWindows())
+        {
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621))
+            {
+                appearanceRows.Add(Ui.Row("启用 Acrylic 效果",
+                    "实时模糊岛屿后方的桌面作为背景，随窗口与壁纸变化；开启后岛屿不会出现在截图和录屏中",
+                    Switch("启用 Acrylic 效果", settings.AcrylicIsland,
+                        value => Commit(settings with { AcrylicIsland = value }))));
+                appearanceRows.Add(Ui.Row("Acrylic 刷新率",
+                    "每隔多久重新截取一次岛屿后方的桌面；越高越跟手，也越占用 CPU",
+                    Pick("Acrylic 刷新率",
+                        [
+                            (15, "15 FPS"),
+                            (25, "25 FPS"),
+                            (30, "30 FPS"),
+                            (60, "60 FPS")
+                        ],
+                        settings.AcrylicFrameRate,
+                        value => Commit(settings with { AcrylicFrameRate = value }))));
+            }
+        }
+        else
+        {
+            appearanceRows.Add(Ui.Row("背景模糊", "在支持背景模糊协议的 Wayland 桌面上模糊岛屿后方",
                 Switch("岛屿背景模糊", settings.BackgroundBlur,
                     value => Commit(settings with { BackgroundBlur = value }))));
+        }
+
+        var appearanceSection = Ui.Section("外观", "调整岛屿的尺寸和背景", [.. appearanceRows]);
 
         // ── 交互 ────────────────────────────────────────────────────────────────
         var iconActionChoices = new[]
@@ -478,7 +611,7 @@ internal sealed class SettingsPage : PanelPage
             {
                 Spacing = 3,
                 VerticalAlignment = VerticalAlignment.Center,
-                Children = { Ui.Text(title, 14, FontWeight.SemiBold), Ui.Text(description, 12, muted: true) }
+                Children = { Ui.Text(title, 14, Ui.Emphasis), Ui.Text(description, 12, muted: true) }
             };
             var header = new Grid
             {
@@ -499,9 +632,6 @@ internal sealed class SettingsPage : PanelPage
             Ui.Row("锁定位置", "禁止鼠标拖动，双击隐藏仍可使用",
                 Switch("锁定岛屿位置", settings.LockPosition,
                     value => Commit(settings with { LockPosition = value }))),
-            Ui.Row("鼠标完全穿透", "开启后岛屿不接收鼠标操作，可从设置窗口关闭",
-                Switch("鼠标完全穿透", settings.ClickThrough,
-                    value => Commit(settings with { ClickThrough = value }))),
             SideIconActionRow(
                 "左侧图标悬浮操作",
                 "鼠标悬停在灵动岛左侧图标时切换为快捷按钮",
@@ -516,6 +646,10 @@ internal sealed class SettingsPage : PanelPage
                 settings.RightIconAction,
                 IslandIconAction.Favorite,
                 value => Commit(settings with { RightIconAction = value })));
+        if (OperatingSystem.IsLinux())
+            positionSection.Children.Add(Ui.Group(Ui.Row("鼠标穿透", "整个岛屿不接收鼠标操作，可从设置中关闭",
+                Switch("岛屿鼠标穿透", settings.ClickThrough,
+                    value => Commit(settings with { ClickThrough = value })))));
 
         // ── 行为 ────────────────────────────────────────────────────────────────
         var behaviorSection = Ui.Section(
@@ -535,7 +669,7 @@ internal sealed class SettingsPage : PanelPage
                     [(2, "2 秒"), (5, "5 秒"), (10, "10 秒"), (30, "30 秒")],
                     settings.TemporaryHideSeconds,
                     value => Commit(settings with { TemporaryHideSeconds = value }))),
-            Ui.Row("登录后自动启动", "使用桌面环境的自启动目录",
+            Ui.Row("登录后自动启动", PlatformInfo.IsWindows ? "添加到当前用户的 Windows 启动项" : "使用桌面环境的自启动目录",
                 Switch("登录后自动启动", settings.StartOnLogin,
                     value => Commit(settings with { StartOnLogin = value }))));
 
@@ -555,16 +689,16 @@ internal sealed class SettingsPage : PanelPage
                     value => Commit(settings with
                     {
                         MaximumFrameRate = value >= SettingsStore.UnlimitedFrameRateSliderValue ? 0 : (int)value
-                    }))),
-            Ui.Row("垂直同步", "EGL 支持时调整交换间隔；实际呈现由桌面合成器控制",
-                Pick("垂直同步方式",
+                    }))));
+        if (OperatingSystem.IsLinux())
+            renderingSection.Children.Add(Ui.Group(Ui.Row("垂直同步", "最终显示节奏由桌面合成器控制",
+                Pick("垂直同步模式",
                     [
                         (VerticalSyncMode.Disabled, "关闭"),
                         (VerticalSyncMode.Enabled, "垂直同步"),
                         (VerticalSyncMode.Adaptive, "自适应")
-                    ],
-                    settings.VerticalSync,
-                    value => Commit(settings with { VerticalSync = value }))));
+                    ], settings.VerticalSync,
+                    value => Commit(settings with { VerticalSync = value })))));
 
         // ── 缓存 ────────────────────────────────────────────────────────────────
         var cacheStatus = Ui.Text(string.Empty, 12, muted: true);
@@ -591,11 +725,9 @@ internal sealed class SettingsPage : PanelPage
         _onShown = () =>
         {
             var latest = currentSettings();
-            settings = settings with
-            {
-                TrackOffsetsMs = latest.TrackOffsetsMs,
-                TrackOffsetTitles = latest.TrackOffsetTitles
-            };
+            settings = latest;
+            SynchronizeExternalSettings();
+            RefreshCacheSize();
             RefreshTrackOffsetManager();
         };
 
@@ -626,36 +758,89 @@ internal sealed class SettingsPage : PanelPage
             Content = contentPanel
         };
 
+        // A timer drives the glide and each tick also asks for a frame: the request alone
+        // produced no frames at all here, and a bare timer could land between presentations.
         var scrollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         var scrollClock = new Stopwatch();
-        var scrollStart = 0d;
+        var scrollFrom = 0d;
         var scrollTarget = 0d;
+        var scrollRunning = false;
+        int? pinnedSection = null;
+        var navButtons = new List<Button>();
+
+        void ScrollStep()
+        {
+            if (!scrollRunning)
+            {
+                scrollTimer.Stop();
+                return;
+            }
+            var maximum = Math.Max(0, scroller.Extent.Height - scroller.Viewport.Height);
+            var progress = Math.Min(1, scrollClock.Elapsed.TotalMilliseconds / 360);
+            var eased = 1 - Math.Pow(1 - progress, 3);
+            var target = Math.Clamp(scrollTarget, 0, maximum);
+            scroller.Offset = new Vector(0,
+                Math.Clamp(scrollFrom + (target - scrollFrom) * eased, 0, maximum));
+            if (progress >= 1)
+            {
+                scrollRunning = false;
+                scrollTimer.Stop();
+            }
+        }
+
         scrollTimer.Tick += (_, _) =>
         {
-            var progress = Math.Min(1, scrollClock.Elapsed.TotalMilliseconds / 320);
-            var eased = 1 - Math.Pow(1 - progress, 3);
-            var maximum = Math.Max(0, scroller.Extent.Height - scroller.Viewport.Height);
-            scroller.Offset = new Vector(0, Math.Clamp(scrollStart + (scrollTarget - scrollStart) * eased, 0, maximum));
-            if (progress >= 1)
-                scrollTimer.Stop();
-        };
-        scroller.AddHandler(Avalonia.Input.InputElement.PointerWheelChangedEvent,
-            (_, _) => scrollTimer.Stop(), Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        scroller.AddHandler(Avalonia.Input.InputElement.PointerPressedEvent,
-            (_, _) => scrollTimer.Stop(), Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        scroller.AddHandler(Avalonia.Input.InputElement.KeyDownEvent,
-            (_, _) => scrollTimer.Stop(), Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        DetachedFromVisualTree += (_, _) => scrollTimer.Stop();
-        PropertyChanged += (_, args) =>
-        {
-            if (args.Property == IsVisibleProperty && !IsVisible)
-                scrollTimer.Stop();
+            ScrollStep();
+            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_ => ScrollStep());
         };
 
-        var navButtons = new List<Button>();
+        void StartScroll(double target)
+        {
+            scrollFrom = scroller.Offset.Y;
+            scrollTarget = target;
+            scrollClock.Restart();
+            scrollRunning = true;
+            scrollTimer.Start();
+            ScrollStep();
+            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_ => ScrollStep());
+        }
+
+        void StopScroll()
+        {
+            scrollRunning = false;
+            scrollTimer.Stop();
+        }
+
+        void ReleasePin()
+        {
+            pinnedSection = null;
+            UpdateActiveSection();
+        }
+
+        scroller.AddHandler(Avalonia.Input.InputElement.PointerWheelChangedEvent,
+            (_, _) =>
+            {
+                StopScroll();
+                ReleasePin();
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        scroller.AddHandler(Avalonia.Input.InputElement.PointerPressedEvent,
+            (_, _) =>
+            {
+                StopScroll();
+                ReleasePin();
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        scroller.AddHandler(Avalonia.Input.InputElement.KeyDownEvent,
+            (_, _) =>
+            {
+                StopScroll();
+                ReleasePin();
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        DetachedFromVisualTree += (_, _) => StopScroll();
+
         var navList = new StackPanel { Spacing = 4, Margin = new Thickness(20, 4, 8, 16) };
         foreach (var section in sections)
         {
+            var navIndex = navButtons.Count;
             var nav = new Button
             {
                 Height = 42,
@@ -688,17 +873,28 @@ internal sealed class SettingsPage : PanelPage
                         }
                     }
                 },
+                // The hover/active background fades in instead of snapping.
+                Transitions = new Transitions
+                {
+                    new BrushTransition
+                    {
+                        Property = TemplatedControl.BackgroundProperty,
+                        Duration = TimeSpan.FromMilliseconds(150)
+                    }
+                },
                 Classes = { "nav" }
             };
             AutomationProperties.SetName(nav, $"跳转到{section.Title}");
             var target = section.Section;
             nav.Click += (_, _) =>
             {
+                // The target is resolved while scrolling: right after the page is shown the
+                // extent may still belong to the previous page, and clamping against it cut the
+                // glide short.
                 var y = target.TranslatePoint(new Point(0, 0), contentPanel)?.Y ?? 0;
-                scrollStart = scroller.Offset.Y;
-                scrollTarget = Math.Clamp(y - 4, 0, Math.Max(0, scroller.Extent.Height - scroller.Viewport.Height));
-                scrollClock.Restart();
-                scrollTimer.Start();
+                pinnedSection = navIndex;
+                UpdateActiveSection();
+                StartScroll(Math.Max(0, y - 4));
             };
             navButtons.Add(nav);
             navList.Children.Add(nav);
@@ -709,7 +905,14 @@ internal sealed class SettingsPage : PanelPage
             var active = 0;
             var atEnd = scroller.Extent.Height > scroller.Viewport.Height
                 && scroller.Offset.Y >= scroller.Extent.Height - scroller.Viewport.Height - 1;
-            if (atEnd)
+            if (pinnedSection is { } pinned)
+            {
+                // The section that was clicked stays selected until the user scrolls by hand;
+                // without this, sections near the end could never be highlighted because the
+                // page cannot scroll far enough to put them at the top.
+                active = pinned;
+            }
+            else if (atEnd)
                 active = sections.Length - 1;
             else
             {
@@ -729,7 +932,15 @@ internal sealed class SettingsPage : PanelPage
         }
 
         scroller.ScrollChanged += (_, _) => UpdateActiveSection();
-        scroller.LayoutUpdated += (_, _) => UpdateActiveSection();
+        // A page that is brought back to the front keeps its scroll offset, so the highlighted
+        // entry has to be re-matched against the sections once it is laid out again.
+        PropertyChanged += (_, args) =>
+        {
+            if (args.Property == IsVisibleProperty && IsVisible)
+                Dispatcher.UIThread.Post(UpdateActiveSection, DispatcherPriority.Loaded);
+            else if (args.Property == IsVisibleProperty)
+                StopScroll();
+        };
 
         var sidebar = new ScrollViewer
         {

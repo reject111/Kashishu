@@ -108,7 +108,7 @@ internal static class SongBanner
         double width, double size, string color, int lines = 1, bool bold = false)
     {
         using var layout = new TextLayout(text,
-            new Typeface(new FontFamily("Noto Sans, Noto Sans CJK SC"),
+            new Typeface(new FontFamily($"{PlatformInfo.LatinFontFamily}, {PlatformInfo.CjkFontFamily}"),
                 weight: bold ? FontWeight.SemiBold : FontWeight.Normal),
             size, new SolidColorBrush(Color.Parse(color)),
             textWrapping: TextWrapping.Wrap, textTrimming: TextTrimming.CharacterEllipsis,

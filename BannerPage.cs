@@ -26,7 +26,7 @@ internal sealed class BannerPage : PanelPage
     private readonly ToggleSwitch _qr = Ui.Toggle("显示 Spotify 二维码", true);
     private readonly ComboBox _line = Ui.Combo("选择歌词", 0);
     private readonly Image _preview = new() { Stretch = Stretch.Uniform };
-    private readonly TextBlock _title = Ui.Text("暂无正在播放的歌曲", 22, FontWeight.SemiBold);
+    private readonly TextBlock _title = Ui.Text("暂无正在播放的歌曲", 22, Ui.Emphasis);
     private readonly TextBlock _detail = Ui.Text("播放歌曲后，再进入此页面生成分享图。", 13, muted: true);
     private readonly TextBlock _dimensions = Ui.Text("", 12, muted: true);
     private readonly TextBlock _status = Ui.Text("", 12, muted: true);
@@ -35,6 +35,8 @@ internal sealed class BannerPage : PanelPage
     private readonly IReadOnlyList<Control> _entrance;
     private readonly Control _empty;
     private Bitmap? _previewBitmap;
+    private string? _previewKey;
+    private bool _updating;
     private bool _copying;
     private bool _closed;
     private CancellationTokenSource? _coverCancellation;
@@ -73,14 +75,14 @@ internal sealed class BannerPage : PanelPage
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                Ui.Text("分享此刻的音乐", 19, FontWeight.SemiBold),
+                Ui.Text("分享此刻的音乐", 19, Ui.Emphasis),
                 Ui.Text("播放歌曲后即可预览分享图", 13, muted: true)
             }
         };
         var previewContent = new Grid
         {
             RowDefinitions = new RowDefinitions("Auto,16,*,12,Auto"),
-            Children = { Ui.Text("图片预览", 14, FontWeight.SemiBold), new Grid { Children = { empty, _preview } }, _dimensions }
+            Children = { Ui.Text("图片预览", 14, Ui.Emphasis), new Grid { Children = { empty, _preview } }, _dimensions }
         };
         Grid.SetRow(previewContent.Children[1], 2);
         Grid.SetRow(_dimensions, 4);
@@ -91,7 +93,7 @@ internal sealed class BannerPage : PanelPage
             Ui.Block(new StackPanel
             {
                 Spacing = 10,
-                Children = { Ui.Text("图片方向", 14, FontWeight.SemiBold), _orientation }
+                Children = { Ui.Text("图片方向", 14, Ui.Emphasis), _orientation }
             }),
             Ui.Row("歌词", "在图片中显示选中的一句", _lyrics),
             Ui.Block(new StackPanel
@@ -171,6 +173,7 @@ internal sealed class BannerPage : PanelPage
 
     public override void OnShown()
     {
+        _updating = true;
         _coverCancellation?.Cancel();
         _coverCancellation?.Dispose();
         _coverCancellation = new CancellationTokenSource();
@@ -184,9 +187,6 @@ internal sealed class BannerPage : PanelPage
         _title.Text = _track?.Title ?? "暂无正在播放的歌曲";
         _detail.Text = _track is null ? "播放歌曲后，再进入此页面生成分享图。" : string.Join(" / ", _track.Artists);
         _empty.IsVisible = _track is null;
-        _preview.Source = null;
-        _previewBitmap?.Dispose();
-        _previewBitmap = null;
         var lines = _track?.Lyrics.Where(line => !string.IsNullOrWhiteSpace(line.Text)).ToArray() ?? [];
         var position = snapshot.PositionMs + settings.LyricsOffsetMs
             + (settings.EnableTrackOffsets ? settings.TrackOffsetFor(_track?.Id) : 0);
@@ -199,13 +199,33 @@ internal sealed class BannerPage : PanelPage
         _line.IsEnabled = _lyrics.IsChecked == true;
         _orientation.IsEnabled = _brand.IsEnabled = _track is not null;
         _copy.IsEnabled = !_copying && _track is not null;
+        _updating = false;
+
+        // 回到本页时如果预览内容没变就复用上一次的位图，避免切换页面时重新渲染掉帧。
+        if (_previewBitmap is null || _previewKey != PreviewKey())
+        {
+            _preview.Source = null;
+            _previewBitmap?.Dispose();
+            _previewBitmap = null;
+            _previewKey = null;
+            QueuePreview(520);
+        }
+
         _coverTask = _track is { } track ? LoadCoverAsync(track, _coverCancellation.Token) : Task.CompletedTask;
-        QueuePreview();
         if (_track is null)
         {
             _dimensions.Text = "";
             _status.Text = "暂无可分享的歌曲";
         }
+    }
+
+    private string PreviewKey()
+    {
+        var line = _lyrics.IsChecked == true ? _line.SelectedItem as LyricLine : null;
+        var art = _track is { AlbumArtBytes.IsDefaultOrEmpty: false } ? _track.AlbumArtBytes.Length : 0;
+        return string.Join('|',
+            _track?.Id, _track?.Title, art, line?.StartMs,
+            _portrait, _translation, _qr.IsChecked, _brand.IsChecked, _lyrics.IsChecked);
     }
 
     private byte[] Render(double scale) => SongBanner.Render(_track!,
@@ -228,7 +248,8 @@ internal sealed class BannerPage : PanelPage
             var image = TrackCache.PreferLargerImage(track.AlbumArtBytes, loaded);
             _track = track with { AlbumArtBytes = image };
             _coverStatus = loaded.IsDefaultOrEmpty ? "封面加载失败，将使用缓存封面" : "";
-            QueuePreview();
+            if (_previewKey != PreviewKey())
+                QueuePreview();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception exception)
@@ -242,11 +263,14 @@ internal sealed class BannerPage : PanelPage
         }
     }
 
-    private void QueuePreview()
+    private void QueuePreview(int delayMs = 120)
     {
+        if (_updating)
+            return;
         _dimensions.Text = "正在更新尺寸…";
         _status.Text = _coverStatus;
         _previewTimer.Stop();
+        _previewTimer.Interval = TimeSpan.FromMilliseconds(delayMs);
         _previewTimer.Start();
     }
 
@@ -262,6 +286,7 @@ internal sealed class BannerPage : PanelPage
             _preview.Source = bitmap;
             _previewBitmap?.Dispose();
             _previewBitmap = bitmap;
+            _previewKey = PreviewKey();
         }
         catch (Exception exception)
         {

@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using Avalonia;
 using Avalonia.Animation;
@@ -36,6 +37,7 @@ public sealed class OverlayWindow : Window
     private IslandSide? _pressedSide;
     private string? _pressedTrackId;
     private bool _dragged;
+    private PixelPoint? _dragPosition;
     private IDisposable? _pendingClick;
     private bool _playbackBusy;
     private StandardCursorType? _cursorType;
@@ -47,6 +49,9 @@ public sealed class OverlayWindow : Window
     private readonly Separator _trackOffsetSeparator;
     private IslandSettings _settings;
     private NativeOverlay? _nativeOverlay;
+#if WINDOWS
+    private WindowsOverlay? _windowsOverlay;
+#endif
     private bool _opened;
     private bool _closed;
     private bool _temporarilyHidden;
@@ -77,6 +82,8 @@ public sealed class OverlayWindow : Window
         ShowInTaskbar = false;
         ShowActivated = false;
         ExtendClientAreaToDecorationsHint = true;
+        if (OperatingSystem.IsWindows())
+            Topmost = true;
 
         _island = new IslandControl(store);
         _island.ApplySettings(_settings);
@@ -137,7 +144,7 @@ public sealed class OverlayWindow : Window
             BorderBrush = MenuBorder,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
-            FontFamily = new FontFamily("Noto Sans CJK SC"),
+            FontFamily = new FontFamily(PlatformInfo.CjkFontFamily),
             FontSize = 12.5,
             LetterSpacing = 0,
             WindowManagerAddShadowHint = true
@@ -162,6 +169,22 @@ public sealed class OverlayWindow : Window
         RefreshTrackOffsetMenu();
         Content = _island;
 
+#if WINDOWS
+        PositionChanged += (_, _) =>
+        {
+            if (_opened)
+                UpdateScreenMapping();
+        };
+        PropertyChanged += (_, args) =>
+        {
+            if (_opened && args.Property.Name == "RenderScaling")
+            {
+                UpdateScreenMapping();
+                UpdateSurfaceRegions(_island.PillBounds);
+            }
+        };
+#endif
+
         Opened += (_, _) =>
         {
             if (!_opened)
@@ -170,6 +193,18 @@ public sealed class OverlayWindow : Window
                 ApplyGeometry();
                 Screens.Changed += ScreensChanged;
                 _nativeOverlay = NativeOverlay.TryCreate(this);
+#if WINDOWS
+                if (OperatingSystem.IsWindows())
+                {
+                    _windowsOverlay = new WindowsOverlay(this)
+                    {
+                        ConstrainPosition = ConstrainToWorkingArea,
+                        MoveCompleted = OnIslandDragCompleted
+                    };
+                    _windowsOverlay.Attach();
+                    _windowsOverlay.SetCaptureHidden(_settings.AcrylicIsland);
+                }
+#endif
             }
             UpdateSurfaceRegions(_island.PillBounds);
         };
@@ -181,6 +216,9 @@ public sealed class OverlayWindow : Window
             _lifetime.Dispose();
             Screens.Changed -= ScreensChanged;
             _nativeOverlay?.Dispose();
+#if WINDOWS
+            _windowsOverlay?.Dispose();
+#endif
             _island.Cursor?.Dispose();
             _island.Dispose();
         };
@@ -191,6 +229,9 @@ public sealed class OverlayWindow : Window
         var previous = _settings;
         _settings = SettingsStore.Normalize(settings);
         _island.ApplySettings(_settings);
+#if WINDOWS
+        _windowsOverlay?.SetCaptureHidden(_settings.AcrylicIsland);
+#endif
         _hideItem.Header = HideLabel(_settings.TemporaryHideSeconds);
         RefreshTrackOffsetMenu();
         UpdateSurfaceRegions(_island.PillBounds);
@@ -205,6 +246,11 @@ public sealed class OverlayWindow : Window
     {
         _nativeOverlay?.SetIslandRegion(bounds, _settings.ClickThrough || _temporarilyHidden,
             _settings.BackgroundBlur && !_temporarilyHidden);
+#if WINDOWS
+        // Windows cannot make a transparent DirectComposition window click-through while it is
+        // visible; only the hidden state can drop the region entirely.
+        _windowsOverlay?.SetIslandRegion(bounds, _temporarilyHidden);
+#endif
     }
 
     internal static double CalculateLogicalWidth(int physicalWidth, double scaling, double percent)
@@ -218,6 +264,24 @@ public sealed class OverlayWindow : Window
         BaseHeight * SettingsStore.NormalizeScalePercent(scalePercent) / 100d;
 
     private void ScreensChanged(object? sender, EventArgs args) => ApplyGeometry();
+
+    /// <summary>
+    /// The OS move loop takes the pointer for itself, so no pointer-release event arrives and
+    /// the window position has to be settled from WM_EXITSIZEMOVE instead.
+    /// </summary>
+    private void OnIslandDragCompleted()
+    {
+        _dragPosition = ConstrainToWorkingArea(Position);
+        Position = _dragPosition.Value;
+        UpdateScreenMapping();
+    }
+
+    private void UpdateScreenMapping()
+    {
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is not null)
+            _island.SetScreenMapping(Position, screen.Bounds, RenderScaling);
+    }
 
     private void CancelPendingClick()
     {
@@ -281,6 +345,9 @@ public sealed class OverlayWindow : Window
         if (!_settings.LockPosition)
         {
             _pressArgs = null;
+            // BeginMoveDrag hands the pointer to the OS move loop and returns at once; the
+            // loop itself is constrained through WM_WINDOWPOSCHANGING (WindowsOverlay), and
+            // the final position is settled in WM_EXITSIZEMOVE.
             BeginMoveDrag(press);
         }
         args.Handled = true;
@@ -530,7 +597,9 @@ public sealed class OverlayWindow : Window
 
     private void ApplyGeometry()
     {
-        var screen = Screens.Primary ?? Screens.All.FirstOrDefault();
+        var screen = OperatingSystem.IsWindows() && _dragPosition is not null
+            ? Screens.ScreenFromWindow(this) ?? Screens.Primary
+            : Screens.Primary ?? Screens.All.FirstOrDefault();
         var width = Math.Round(screen is null ? Width
             : CalculateLogicalWidth(screen.WorkingArea.Width, screen.Scaling, _settings.WidthPercent));
         var height = Math.Round(CalculateLogicalHeight(_settings.ScalePercent));
@@ -542,6 +611,67 @@ public sealed class OverlayWindow : Window
         Height = height;
         MinWidth = MaxWidth = width;
         MinHeight = MaxHeight = height;
+
+        // Wayland compositors place toplevels themselves; Windows needs an explicit top-centre
+        // position and will otherwise centre the transparent window on the whole screen.
+        if (OperatingSystem.IsWindows() && screen is not null)
+        {
+            var scaling = screen.Scaling > 0 && double.IsFinite(screen.Scaling) ? screen.Scaling : 1d;
+            var physicalWidth = (int)Math.Round(width * scaling);
+            var x = screen.WorkingArea.X + Math.Max(0, (screen.WorkingArea.Width - physicalWidth) / 2);
+            var y = screen.WorkingArea.Y + (int)Math.Round(
+                SettingsStore.NormalizeTopOffset(_settings.TopOffset) * scaling);
+            // Keep the spot the user dragged the island to; fall back to top centre otherwise.
+            var position = ConstrainToWorkingArea(_dragPosition ?? new PixelPoint(x, y));
+            if (_dragPosition is not null)
+                _dragPosition = position;
+            Position = position;
+            UpdateScreenMapping();
+        }
+    }
+
+    /// <summary>
+    /// Keeps the capsule inside the working area of the monitor it is on. The window is a wide
+    /// transparent rectangle with padding above and below the pill, so clamping the window
+    /// rectangle would leave the pill a padding away from the screen edge; the pill is clamped
+    /// instead and the transparent padding is allowed to hang off screen. That way the capsule
+    /// can sit flush against the top edge and can never be dragged out of sight.
+    /// </summary>
+    internal PixelPoint ConstrainToWorkingArea(PixelPoint position)
+    {
+        if (!OperatingSystem.IsWindows())
+            return position;
+
+        var bounds = _island.FullPillBounds;
+        if (bounds.Width <= 0d || bounds.Height <= 0d)
+            bounds = _island.PillBounds;
+        if (bounds.Width <= 0d || bounds.Height <= 0d)
+            return position;
+
+        var scaling = RenderScaling;
+        if (!double.IsFinite(scaling) || scaling <= 0d)
+            scaling = 1d;
+        var pillWidth = bounds.Width * scaling;
+        var pillHeight = bounds.Height * scaling;
+        var center = new PixelPoint(
+            (int)Math.Round(position.X + (bounds.Left + bounds.Width / 2d) * scaling),
+            (int)Math.Round(position.Y + (bounds.Top + bounds.Height / 2d) * scaling));
+        var screen = Screens.ScreenFromPoint(center)
+            ?? Screens.ScreenFromPoint(new PixelPoint(
+                position.X + (int)Math.Round(Width * scaling / 2d),
+                position.Y + (int)Math.Round(Height * scaling / 2d)))
+            ?? Screens.Primary;
+        if (screen is null)
+            return position;
+
+        var area = screen.WorkingArea;
+        var left = Math.Clamp(position.X + bounds.Left * scaling, area.X,
+            Math.Max(area.X, area.Right - pillWidth));
+        var top = Math.Clamp(position.Y + bounds.Top * scaling, area.Y,
+            Math.Max(area.Y, area.Bottom - pillHeight));
+        return new PixelPoint(
+            (int)Math.Round(left - bounds.Left * scaling),
+            (int)Math.Round(top - bounds.Top * scaling));
     }
 }
 
@@ -588,9 +718,12 @@ public sealed class IslandControl : Control, IDisposable
     private long _switchPositionMs;
     private long _switchRequestedAt;
     private long _switchCompletedAt;
+    private int _liveFrameIntervalMs = 40;
+    private long _liveFrameAt;
     private long _switchStartedAt;
     private long _switchReturningAt;
     private Rect _pillBounds;
+    private Rect _fullPillBounds;
     private PlaybackSnapshot? _renderedSnapshot;
     private Point _pointer = new(-1, -1);
     private IslandIconAction _leftIconAction = IslandIconAction.LyricsWindow;
@@ -607,6 +740,9 @@ public sealed class IslandControl : Control, IDisposable
     private bool _disposed;
 
     internal Rect PillBounds => _pillBounds;
+    /// <summary>The pill without the capsule show/hide animation; use it to reason about the
+    /// island's footprint while it is collapsed.</summary>
+    internal Rect FullPillBounds => _fullPillBounds;
     internal Point Pointer => _pointer;
     internal bool TrackSwitchInProgress => _switchOutgoing is not null;
     internal event Action<Rect>? PillBoundsChanged;
@@ -728,6 +864,13 @@ public sealed class IslandControl : Control, IDisposable
             && !TrackSwitchInProgress
             && !_delayedHidePending && ReferenceEquals(snapshot, _renderedSnapshot))
         {
+            // The live material keeps changing while nothing else animates, and Avalonia only
+            // presents a frame that was requested - a timer alone stopped the picture updating.
+            if (LiveAcrylic && _showIsland)
+            {
+                _frameScheduler.Request(topLevel, OnAnimationFrame);
+                return;
+            }
             _idleFrame = Avalonia.Threading.DispatcherTimer.RunOnce(() =>
             {
                 _idleFrame = null;
@@ -745,13 +888,27 @@ public sealed class IslandControl : Control, IDisposable
             return;
 
         var snapshot = _store.Snapshot;
+        // The desktop is captured on its own clock, so a redraw per display frame would only
+        // repeat the same material.
+        var liveFrameDue = LiveAcrylic && _showIsland
+            && Environment.TickCount64 - _liveFrameAt >= _liveFrameIntervalMs;
+        if (liveFrameDue)
+            _liveFrameAt = Environment.TickCount64;
         if ((_showIsland && snapshot.IsPlaying) || _outgoing is not null || _capsuleTransitioning || _sidesTransitioning
             || _lyricsTransitioning || _sideIconsTransitioning || _delayedHidePending
             || TrackSwitchInProgress
+            || liveFrameDue
             || !ReferenceEquals(snapshot, _renderedSnapshot))
             InvalidateVisual();
         QueueAnimationFrame();
     }
+
+    /// <summary>Passes the window's screen placement on to the renderer for wallpaper sampling.</summary>
+    internal void SetScreenMapping(PixelPoint origin, PixelRect screen, double scaling) =>
+        _renderer.SetScreenMapping(origin, screen, scaling);
+
+    /// <summary>The capsule samples the desktop behind it, so it keeps needing frames while idle.</summary>
+    private bool LiveAcrylic => _renderer.NeedsLiveFrames;
 
     internal void ApplySettings(IslandSettings settings)
     {
@@ -770,6 +927,10 @@ public sealed class IslandControl : Control, IDisposable
         }
         _pausedDisplay = settings.PausedDisplay;
         _renderer.SetBackgroundOpacity(settings.BackgroundOpacityPercent);
+        _renderer.SetAcrylic(settings.AcrylicIsland);
+        var acrylicFps = SettingsStore.NormalizeAcrylicFrameRate(settings.AcrylicFrameRate);
+        _liveFrameIntervalMs = Math.Max(16, 1000 / acrylicFps);
+        _renderer.SetAcrylicFrameRate(acrylicFps);
         WakeAnimation();
     }
 
@@ -865,10 +1026,31 @@ public sealed class IslandControl : Control, IDisposable
 
         if (!ReferenceEquals(track, _track))
         {
+            var previous = _track;
             _track = track;
             _lineIndex = int.MinValue;
             _line = null;
             _outgoing = null;
+            // A track the player changed on its own gets the same slide as a Next press: the
+            // player's own UI, another device or the end of a queue would otherwise cut over.
+            if (previous is not null && track is not null && previous.Id != track.Id
+                && _switchOutgoing is null
+                && _renderedFrame is { Track: { } shown } outgoing && shown.Id == previous.Id)
+            {
+                var started = Stopwatch.GetTimestamp();
+                _switchOutgoing = outgoing with
+                {
+                    TrackSwitch = null,
+                    LeftIcon = default,
+                    RightIcon = default
+                };
+                _switchDirection = 1;
+                _switchPositionMs = snapshot.ReportedPositionMs;
+                _switchRequestedAt = started;
+                _switchCompletedAt = 0;
+                _switchReturningAt = 0;
+                _switchStartedAt = started;
+            }
         }
 
         var nextIndex = FindLine(track?.Lyrics, position);
@@ -977,6 +1159,7 @@ public sealed class IslandControl : Control, IDisposable
             trackSwitch,
             _englishWordEffects);
         var fullPillBounds = _renderer.CalculatePillBounds((float)Bounds.Width, (float)Bounds.Height, baseFrame);
+        _fullPillBounds = fullPillBounds;
         var pillBounds = IslandRenderer.ScalePillBounds(fullPillBounds, _capsuleProgress);
         if (pillBounds != _pillBounds)
         {
@@ -1234,13 +1417,29 @@ internal sealed class IslandRenderer : IDisposable
     private const float TranslationSize = 21f;
     private const float CollapsedWidth = 450f;
     private const float DoubleLineOriginOffset = 2f;
+    // 文字裁剪区左右各让出 42/41 像素，两侧图标完全显示时再各加 43，共 169；
+    // 内容留白取 178，让刚好占满最大宽度的文字仍然整个落在裁剪区里。
+    private const float ContentPadding = 178f;
+    private const float MinimumPillContentWidth = 390f;
+
+    // Microsoft YaHei UI has no Medium face, so weight 500 snaps down to Regular and Chinese
+    // and Japanese lyrics look thin next to Segoe UI. Windows uses real Bold faces instead.
+    private static readonly SKFontStyleWeight LatinWeight = PlatformInfo.IsWindows
+        ? SKFontStyleWeight.SemiBold
+        : SKFontStyleWeight.Medium;
+    private static readonly SKFontStyleWeight CjkWeight = PlatformInfo.IsWindows
+        ? SKFontStyleWeight.Bold
+        : SKFontStyleWeight.Medium;
 
     private readonly SKTypeface _latin = SKTypeface.FromFamilyName(
-        "Montserrat", SKFontStyleWeight.Medium, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+        PlatformInfo.LatinFontFamily, LatinWeight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
     private readonly SKTypeface _cjk = SKTypeface.FromFamilyName(
-        "Noto Sans CJK SC", SKFontStyleWeight.Medium, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
-    private readonly SKTypeface _japanese = SKTypeface.FromFamilyName(
-        "Noto Sans CJK JP", SKFontStyleWeight.Medium, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+        PlatformInfo.CjkFontFamily, CjkWeight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+    private readonly SKTypeface _japanese = LyricsFonts.ResolveTypeface(
+        PlatformInfo.JapaneseFontCandidates,
+        new SKFontStyle(CjkWeight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright));
+    private readonly SKTypeface _cjkRegular = SKTypeface.FromFamilyName(
+        PlatformInfo.CjkFontFamily, SKFontStyleWeight.Normal, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
     private readonly SKFont _latinFont;
     private readonly SKFont _cjkFont;
     private readonly SKFont _japaneseFont;
@@ -1289,14 +1488,117 @@ internal sealed class IslandRenderer : IDisposable
         _latinFont = CreateFont(_latin, MainSize);
         _cjkFont = CreateFont(_cjk, MainSize);
         _japaneseFont = CreateFont(_japanese, MainSize);
-        _translationFont = CreateFont(_cjk, TranslationSize);
+        _translationFont = CreateFont(_cjkRegular, TranslationSize);
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("LyricifyIsland.icon.png");
         if (stream is not null)
             _icon = SKBitmap.Decode(stream);
     }
 
-    internal void SetBackgroundOpacity(double percent) =>
-        _fill.Color = new SKColor(3, 5, 7, BackgroundAlpha(percent));
+    // The acrylic material is drawn inside the capsule: the wallpaper behind the island, heavily
+    // blurred and desaturated, with a grain layer and a tint. Windows cannot clip its own
+    // Mica/Acrylic material to a window region, so the system material would cover the whole
+    // window rectangle instead of the capsule.
+    private const double AcrylicTintFactor = 0.42d;
+    // Where the sung part ends inside the viewport: the rest shows the words still to come.
+    private const float ScrollLeadFraction = 0.6f;
+    private const int AcrylicNoiseSize = 128;
+    private double _backgroundOpacityPercent = SettingsStore.DefaultBackgroundOpacityPercent;
+    private readonly SKPaint _acrylicFill = Paint(new SKColor(3, 5, 7, 100));
+    private readonly SKPaint _acrylicNoisePaint = new()
+    {
+        IsAntialias = true,
+        // A shader is modulated by the paint colour, and the default is opaque black, which
+        // would paint the whole capsule solid instead of adding the grain.
+        Color = SKColors.White,
+        BlendMode = SKBlendMode.SrcOver
+    };
+    private bool _acrylic;
+    private float _drawScale = 1f;
+    private PixelPoint _screenOrigin;
+    private PixelRect _screenBounds;
+    private double _screenScaling = 1d;
+    private SKImage? _acrylicNoise;
+#if WINDOWS
+    private readonly DesktopCapture _desktopCapture = new();
+    private SKImage? _liveDesktop;
+    private long _liveCaptureAt;
+    private int _liveLeft;
+    private int _liveTop;
+    private int _liveWidth;
+    private int _liveHeight;
+#endif
+
+    internal void SetBackgroundOpacity(double percent)
+    {
+        _backgroundOpacityPercent = SettingsStore.NormalizeBackgroundOpacityPercent(percent);
+        ApplyFill();
+    }
+
+    /// <summary>Screen placement of the island, used to sample the wallpaper under the pill.</summary>
+    internal void SetScreenMapping(PixelPoint origin, PixelRect screen, double scaling)
+    {
+        _screenOrigin = origin;
+        _screenBounds = screen;
+        _screenScaling = double.IsFinite(scaling) && scaling > 0d ? scaling : 1d;
+    }
+
+    internal void SetAcrylic(bool enabled)
+    {
+        _acrylic = enabled;
+        ApplyFill();
+    }
+
+    /// <summary>How often the desktop is re-sampled, in frames per second.</summary>
+    internal void SetAcrylicFrameRate(int framesPerSecond)
+    {
+#if WINDOWS
+        _liveCaptureIntervalMs = Math.Max(16, 1000 / Math.Max(1, framesPerSecond));
+#endif
+    }
+
+    /// <summary>
+    /// True while the capsule samples the live desktop, which changes with every window behind
+    /// it and therefore needs a steady stream of frames even when nothing else animates.
+    /// </summary>
+    internal bool NeedsLiveFrames =>
+#if WINDOWS
+        _acrylic;
+#else
+        false;
+#endif
+
+    private void ApplyFill()
+    {
+        var alpha = BackgroundAlpha(_backgroundOpacityPercent);
+        _fill.Color = new SKColor(3, 5, 7, alpha);
+        _acrylicFill.Color = new SKColor(3, 5, 7, (byte)Math.Round(alpha * AcrylicTintFactor));
+        _shadow.Color = new SKColor(0, 0, 0, 115);
+    }
+
+    /// <summary>
+    /// Builds the grain tile once. It is a fine random speckle at a very low alpha, which is what
+    /// keeps the blurred desktop from looking like a flat cut-out.
+    /// </summary>
+    private void EnsureAcrylicNoise()
+    {
+        if (_acrylicNoise is not null)
+            return;
+        using var noise = new SKBitmap(AcrylicNoiseSize, AcrylicNoiseSize);
+        var random = new Random(20251115);
+        for (var y = 0; y < AcrylicNoiseSize; y++)
+        {
+            for (var x = 0; x < AcrylicNoiseSize; x++)
+            {
+                var bright = (byte)random.Next(150, 256);
+                var alpha = (byte)random.Next(0, 16);
+                noise.SetPixel(x, y, new SKColor(bright, bright, bright, alpha));
+            }
+        }
+
+        _acrylicNoise = SKImage.FromBitmap(noise);
+        _acrylicNoisePaint.Shader = SKShader.CreateImage(
+            _acrylicNoise, SKShaderTileMode.Repeat, SKShaderTileMode.Repeat);
+    }
 
     internal static byte BackgroundAlpha(double percent) =>
         (byte)Math.Round(255d * SettingsStore.NormalizeBackgroundOpacityPercent(percent) / 100d);
@@ -1307,6 +1609,7 @@ internal sealed class IslandRenderer : IDisposable
         canvas.Save();
         canvas.Clear(SKColors.Transparent);
         canvas.Scale(visualScale);
+        _drawScale = visualScale;
         width /= visualScale;
         height /= visualScale;
 
@@ -1361,8 +1664,8 @@ internal sealed class IslandRenderer : IDisposable
 
         var verticalInset = pillHeight < DoubleLinePillHeight ? 4f : 7f;
         var clip = new SKRect(
-            pillLeft + 24f + 43f * sidesProgress, pillTop + verticalInset,
-            pillRect.Right - 23f - 43f * sidesProgress, pillRect.Bottom - verticalInset);
+            pillLeft + 42f + 43f * sidesProgress, pillTop + verticalInset,
+            pillRect.Right - 41f - 43f * sidesProgress, pillRect.Bottom - verticalInset);
         canvas.Save();
         canvas.ClipRect(clip);
         canvas.Translate(clip.MidX, clip.MidY);
@@ -1557,12 +1860,111 @@ internal sealed class IslandRenderer : IDisposable
 
     private void DrawPill(SKCanvas canvas, SKRect rect)
     {
+        var radius = rect.Height / 2f;
+        if (_acrylic && TryDrawAcrylic(canvas, rect, radius))
+        {
+            canvas.DrawRoundRect(rect, radius, radius, _rim);
+            return;
+        }
+
         var shadowRect = rect;
         shadowRect.Offset(0, 3f);
-        canvas.DrawRoundRect(shadowRect, rect.Height / 2f, rect.Height / 2f, _shadow);
-        canvas.DrawRoundRect(rect, rect.Height / 2f, rect.Height / 2f, _fill);
-        canvas.DrawRoundRect(rect, rect.Height / 2f, rect.Height / 2f, _rim);
+        canvas.DrawRoundRect(shadowRect, radius, radius, _shadow);
+        canvas.DrawRoundRect(rect, radius, radius, _fill);
+        canvas.DrawRoundRect(rect, radius, radius, _rim);
     }
+
+    /// <summary>
+    /// Paints the acrylic material: the desktop behind the pill, blurred and desaturated by the
+    /// capture, finished with the grain and the tint and clipped to the capsule. Returns false
+    /// when the desktop cannot be grabbed, and the caller then paints the plain fill instead.
+    /// </summary>
+    private bool TryDrawAcrylic(SKCanvas canvas, SKRect rect, float radius)
+    {
+#if WINDOWS
+        return TryDrawLiveDesktop(canvas, rect, radius);
+#else
+        return false;
+#endif
+    }
+
+#if WINDOWS
+    // The capsule is made of the desktop behind it, grabbed a few times a second at a third of
+    // its size and blurred, then finished with the grain and the tint. Grabbing is cheap because
+    // the region is tiny, and it follows the desktop instead of a stored picture of the wallpaper.
+    private int _liveCaptureIntervalMs = 40;
+    private const int LiveCaptureDownscale = 4;
+    private const float LiveBlurSigma = 26f;
+    private const int LiveBlurRadius = 6;
+    private const float AcrylicSaturationFactor = 0.85f;
+
+    private bool TryDrawLiveDesktop(SKCanvas canvas, SKRect rect, float radius)
+    {
+        if (_screenBounds.Width <= 0 || _screenBounds.Height <= 0 || _screenScaling <= 0d)
+            return false;
+
+        // The capture reaches past the capsule: a blur fades out at the edge of its input, and
+        // the capsule's own edge must not show that fade.
+        var margin = LiveBlurSigma * 1.5f;
+        var unit = (float)(_drawScale * _screenScaling);
+        var left = Math.Max(_screenBounds.X,
+            (int)MathF.Floor(_screenOrigin.X + (rect.Left - margin) * unit));
+        var top = Math.Max(_screenBounds.Y,
+            (int)MathF.Floor(_screenOrigin.Y + (rect.Top - margin) * unit));
+        var right = Math.Min(_screenBounds.Right,
+            (int)MathF.Ceiling(_screenOrigin.X + (rect.Right + margin) * unit));
+        var bottom = Math.Min(_screenBounds.Bottom,
+            (int)MathF.Ceiling(_screenOrigin.Y + (rect.Bottom + margin) * unit));
+        var width = right - left;
+        var height = bottom - top;
+        if (width <= 1 || height <= 1)
+            return false;
+
+        var now = Environment.TickCount64;
+        var moved = left != _liveLeft || top != _liveTop
+            || width != _liveWidth || height != _liveHeight;
+        if (_liveDesktop is null || moved || now - _liveCaptureAt >= _liveCaptureIntervalMs)
+        {
+            var image = _desktopCapture.Snapshot(left, top, width, height,
+                Math.Max(1, width / LiveCaptureDownscale),
+                Math.Max(1, height / LiveCaptureDownscale),
+                LiveBlurRadius, AcrylicSaturationFactor);
+            if (image is not null)
+            {
+                _liveDesktop?.Dispose();
+                _liveDesktop = image;
+                _liveCaptureAt = now;
+                _liveLeft = left;
+                _liveTop = top;
+                _liveWidth = width;
+                _liveHeight = height;
+            }
+            else if (_liveDesktop is null)
+            {
+                return false;
+            }
+        }
+        if (_liveDesktop is not { } desktop)
+            return false;
+
+        // Map the captured desktop pixels back into canvas coordinates, so the material stays
+        // locked to the desktop while the island is dragged or the screen scales.
+        var target = new SKRect(
+            (left - _screenOrigin.X) / unit,
+            (top - _screenOrigin.Y) / unit,
+            (right - _screenOrigin.X) / unit,
+            (bottom - _screenOrigin.Y) / unit);
+
+        canvas.Save();
+        canvas.ClipRoundRect(new SKRoundRect(rect, radius, radius), antialias: true);
+        canvas.DrawImage(desktop, target, new SKSamplingOptions(SKFilterMode.Linear));
+        EnsureAcrylicNoise();
+        canvas.DrawRect(rect, _acrylicNoisePaint);
+        canvas.DrawRect(rect, _acrylicFill);
+        canvas.Restore();
+        return true;
+    }
+#endif
 
     private void DrawSides(SKCanvas canvas, IslandFrame frame, SKRect pill)
     {
@@ -1891,20 +2293,32 @@ internal sealed class IslandRenderer : IDisposable
         var translationWidth = hasTranslation ? layout.TranslationWidth : 0f;
         var centerX = clip.MidX;
         var originY = clip.MidY + (hasTranslation ? DoubleLineOriginOffset : 1f);
+        var activeWidth = ActiveWidth(line, positionMs, layout);
+
+        // 长句不截断：视口跟着高亮推进，并让高亮停在视口六成处，后面的字总是提前露出来一点。
+        var overflow = Math.Max(0f, mainWidth - clip.Width);
+        var scroll = overflow > 0f
+            ? Math.Clamp(activeWidth - clip.Width * ScrollLeadFraction, 0f, overflow)
+            : 0f;
+        var progress = overflow > 0f ? scroll / overflow : 0f;
+        var translationOverflow = Math.Max(0f, translationWidth - clip.Width);
 
         canvas.Save();
         canvas.Translate(centerX, originY);
         canvas.Scale(scale, 1f);
         canvas.Translate(-centerX, -originY);
 
-        var mainX = centerX - mainWidth / 2f;
+        var mainX = overflow > 0f ? clip.Left - scroll : centerX - mainWidth / 2f;
         var mainBaseline = hasTranslation ? originY - 5f : CenteredBaseline(originY, layout.Runs, mainFonts.Latin) - 2f;
-        DrawKaraokeText(canvas, line, positionMs, mainX, mainBaseline, layout, opacity, highlightEmphasis);
+        DrawKaraokeText(canvas, line, positionMs, mainX, mainBaseline, layout, opacity, highlightEmphasis, activeWidth);
 
         if (hasTranslation)
         {
             _translationPaint.Color = new SKColor(160, 161, 166, (byte)(220 * opacity));
-            canvas.DrawText(translation, centerX - translationWidth / 2f, originY + 24f, translationFont, _translationPaint);
+            var translationX = translationOverflow > 0f
+                ? clip.Left - progress * translationOverflow
+                : centerX - translationWidth / 2f;
+            canvas.DrawText(translation, translationX, originY + 24f, translationFont, _translationPaint);
         }
         canvas.Restore();
     }
@@ -1917,9 +2331,9 @@ internal sealed class IslandRenderer : IDisposable
         float baseline,
         KaraokeLayout layout,
         float opacity,
-        float highlightEmphasis)
+        float highlightEmphasis,
+        float activeWidth)
     {
-        var activeWidth = ActiveWidth(line, positionMs, layout);
         _idlePaint.Color = new SKColor(108, 109, 114, (byte)(225 * opacity));
         if (activeWidth <= 0f || highlightEmphasis <= 0f)
         {
@@ -2061,8 +2475,19 @@ internal sealed class IslandRenderer : IDisposable
         var titleLayout = LayoutMainText(title, mainFonts);
         var subtitleWidth = translationFont.MeasureText(subtitle);
         var originY = clip.MidY + DoubleLineOriginOffset;
+        // 歌名和状态没有滚动的余地，比裁剪区宽时按比例缩小，免得两边各被切掉一截。
+        var widest = Math.Max(titleLayout.Width, subtitleWidth);
+        var fit = widest > clip.Width ? Math.Max(0.5f, clip.Width / widest) : 1f;
+        canvas.Save();
+        if (fit < 1f)
+        {
+            canvas.Translate(clip.MidX, clip.MidY);
+            canvas.Scale(fit);
+            canvas.Translate(-clip.MidX, -clip.MidY);
+        }
         DrawMainText(canvas, titleLayout.Runs, clip.MidX - titleLayout.Width / 2f, originY - 5f, _titlePaint);
         canvas.DrawText(subtitle, clip.MidX - subtitleWidth / 2f, originY + 24f, translationFont, _subtitlePaint);
+        canvas.Restore();
     }
 
     private float DesiredWidth(
@@ -2091,7 +2516,9 @@ internal sealed class IslandRenderer : IDisposable
             subWidth = translationFont.MeasureText(sub);
         }
         var content = Math.Max(mainWidth, subWidth) * textScale;
-        return Math.Max(content + 146f, 390f);
+        // 内容两侧的留白必须不小于裁剪区让出的宽度，否则刚好放得下的文字仍会被裁掉：
+        // 歌词会因此无谓地滚动，没有歌词时的歌名则会被左右各切掉一截。
+        return Math.Max(content + ContentPadding, MinimumPillContentWidth);
     }
 
     private static string StatusSubtitle(TrackInfo? track, string? status)
@@ -2559,6 +2986,13 @@ internal sealed class IslandRenderer : IDisposable
         _latin.Dispose();
         _cjk.Dispose();
         _japanese.Dispose();
+        _acrylicNoise?.Dispose();
+        _acrylicNoisePaint.Dispose();
+        _acrylicFill.Dispose();
+#if WINDOWS
+        _liveDesktop?.Dispose();
+        _desktopCapture.Dispose();
+#endif
     }
 
     private sealed record KaraokeLayout(

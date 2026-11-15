@@ -1,10 +1,15 @@
 # Lyricify Island
 
-**该项目由 AI 编写**
+**原项目由 AI 编写，由大肥鱼完成 Windows 适配**
+
+## 适配理由
+
+<img src="docs/images/windows-adaptation-reason.png" width="480" alt="有人询问 Windows 版并建议用 AI 移植的聊天截图">
 
 https://github.com/user-attachments/assets/bc65054e-03d4-4007-9032-1123cf56aa45
 
-Linux 桌面歌词岛。当前曲目和播放进度可来自 Spotify Web API 或本机 MPRIS；逐字歌词与翻译通过
+Windows / Linux 桌面歌词岛。当前曲目和播放进度可来自 Spotify Web API 或本机播放器
+（Windows 使用系统媒体会话 SMTC，Linux 使用 MPRIS）；逐字歌词与翻译通过
 [Lyricify Lyrics Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) 获取和解析。
 字体、逐字裁剪、双层微光、播放头 bloom 与换行动画都在 Skia 自绘层完成，正常桌面运行时由 GPU 渲染。
 
@@ -21,6 +26,31 @@ sudo dnf install lyricify-island
 
 安装后可从应用菜单启动 Lyricify Island，也可运行 `LyricifyIsland`。RPM 使用系统的 .NET 运行时和 OpenCC；仓库会在 GitHub 的 main 分支推送后重新构建。
 
+## Windows 安装
+
+Windows 10 1809 及以上或 Windows 11。从 [Releases](https://github.com/reject111/LyricifyIsland/releases)
+下载 `LyricifyIsland-Setup-<版本>.exe` 安装：默认装到当前用户目录，无需管理员权限，可选桌面快捷方式。
+每次向 main 分支推送后，GitHub Actions 会自动构建并发布新的安装包。
+
+从源码构建需要 [.NET 10 SDK](https://dotnet.microsoft.com/download) 和 Inno Setup 6
+（`winget install JRSoftware.InnoSetup`）：
+
+```powershell
+.\build-windows.ps1
+.\build-installer.ps1
+.\run-windows.ps1
+```
+
+构建产物 `dist\LyricifyIsland.exe` 是单个可执行文件，自带 .NET 运行时和原生库，启动不要求系统安装 .NET；
+`build-installer.ps1` 会把它打包成 `dist\LyricifyIsland-Setup-<版本>.exe`。
+`run-windows.ps1` 会在首次运行时自动构建。Windows 版使用 Win32 透明置顶窗口与系统媒体会话：
+
+- “本地媒体会话”读取 Windows 的全局媒体控件（SMTC），支持 Spotify、浏览器、系统播放器等
+  在音量浮层中显示的播放器，无需额外配置。
+- 岛屿窗口置顶且不抢焦点；胶囊以外的透明区域保持鼠标穿透。
+- 耳机控制依赖 Linux BlueZ/RFCOMM，Windows 上不显示该入口；背景模糊和 EGL 垂直同步仅限 Linux，
+  其余界面、歌词、分享图和设置功能与 Linux 版一致。
+
 ## 首次运行
 
 1. 在 [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) 的应用设置中加入回调地址：
@@ -31,10 +61,18 @@ sudo dnf install lyricify-island
    ./build.sh
    ./run.sh
    ```
+
+   Windows 上使用：
+
+   ```powershell
+   .\build-windows.ps1
+   .\run-windows.ps1
+   ```
 3. 岛屿提示未配置时，打开托盘菜单的“设置”，填写 Spotify Client ID 和
    Client Secret，然后点击“保存并重新连接”。
 
-也可以在设置中把“播放信息源”切换为“本地 MPRIS”，直接读取本机播放器，无需 Spotify 参数或授权。
+也可以在设置中把“播放信息源”切换为“本地 MPRIS”（Windows 上显示为“本地媒体会话”），
+直接读取本机播放器，无需 Spotify 参数或授权。
 
 Spotify 模式首次授权时会打开浏览器，请登录并允许读取当前播放状态。刷新令牌只保存在当前用户的状态目录，
 凭据只保存在当前用户的设置文件中；凭据、令牌、构建缓存和发布目录都不会进入 Git。
@@ -123,6 +161,8 @@ Spotify 播放控制使用官方 API，需要 Premium 与 `user-modify-playback-
 托盘的“降噪模式”菜单可以直接切换耳机支持的模式，处于降噪模式时才显示强度选项；
 选中状态随耳机回报更新，未连接时禁用。
 
+该功能仅支持 Linux。Windows 版不显示耳机控制入口，其余播放、歌词和分享图功能不受影响。
+
 连接使用 Linux BlueZ 和 Bluetooth Classic RFCOMM。默认通过服务 UUID 查找控制通道，
 OPPO 系耳机也提供固定通道 15 的连接选项；华为耳机使用标准 SPP 服务，不使用通道 15。
 仅需系统蓝牙服务，无需 root 或另装 Android 模块。
@@ -180,32 +220,38 @@ FreeClip、FreeArc 和眼镜不显示降噪选项；眼镜只显示左右镜腿�
 ./dist/LyricifyIsland --snapshot /tmp/banner-tall.png --banner --portrait
 ```
 
-`--demo --exit-after 5` 可用于五秒启动冒烟检查。
+`--demo --exit-after 5` 可用于五秒启动冒烟检查。Windows 上把 `./run.sh` 换成
+`.\run-windows.ps1`（或 `.\dist\LyricifyIsland.exe`），输出路径换成 Windows 路径即可。
 
 ## 调整
 
 托盘菜单的“设置”页面提供：
 
 - 整体缩放：50%–200%，默认 100%，同步缩放字体、图标、胶囊、间距和光效。
-- 最大宽度：按可用显示器的宽度计算，范围为 40%–100%，默认 70%。
+- 最大宽度：按可用显示器的宽度计算，范围为 40%–100%，默认 70%。胶囊平时按歌词长度收窄，
+  这个值只是上限：只有歌词或翻译比它更长时才会在胶囊里滚动。
 - 背景不透明度：35%–95%；歌词翻译也可以单独关闭。
-- 背景模糊：对支持 `ext-background-effect-v1` 的 Wayland 合成器生效，包括 GNOME 51 的 Mutter；开关立即生效。
+- 背景模糊：对支持 `ext-background-effect-v1` 的 Wayland 合成器生效，包括 GNOME 51 的 Mutter；开关立即生效。Windows 上不可用。
 - 最大刷新率：限制歌词窗口和灵动岛动画的刷新频率，可选 30–360 FPS 或“无限制”。
-- 垂直同步：在 EGL 支持时调整交换间隔；自适应模式不受支持时使用普通垂直同步。最终显示节奏由 Wayland 合成器控制。
+- 垂直同步：在 EGL 支持时调整交换间隔；自适应模式不受支持时使用普通垂直同步。最终显示节奏由桌面合成器控制，Windows 上由系统决定。
 - 歌词时间偏移：全局偏移范围为 -2000–2000 毫秒，正值提前、负值延后。
 - 每首歌曲偏移：可单独开关；启用后从灵动岛右键菜单调整当前歌曲，并在设置页管理已保存歌曲。
 - 歌词源：可选自动、网易云、酷狗或 LRCLIB；也可重新获取当前歌曲。
-- 交互：锁定拖动或让整个窗口穿透鼠标。
+- 交互：锁定拖动或让整个窗口穿透鼠标；整窗穿透仅限 Linux，Windows 上透明区域始终可穿透。
 - 暂停行为：立即隐藏、3 秒后隐藏或保持显示；通过岛屿单击暂停时始终保留并收窄，连接和错误提示不会被隐藏。
 - 临时隐藏：可选 2、5、10 或 30 秒。
-- 登录后自动启动：写入当前用户的 XDG 自启动目录。
-- 播放信息源：可在 Spotify Web API 与本地 MPRIS 之间切换。
+- 登录后自动启动：Linux 写入当前用户的 XDG 自启动目录，Windows 写入当前用户的
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`。
+- 播放信息源：可在 Spotify Web API 与本地播放器之间切换；Windows 上本地来源为系统媒体会话。
 - Spotify Client ID 和 Client Secret：点击保存后重新连接，Secret 在界面中遮蔽显示。
 - 缓存：显示歌词、封面和歌曲信息缓存占用，并可一键清理。
 
 设置保存在 `$XDG_CONFIG_HOME/lyricify-island/settings.json`；未设置 `XDG_CONFIG_HOME` 时使用
 `~/.config/lyricify-island/settings.json`。Linux 下设置目录权限为 `0700`，文件权限为 `0600`。
-歌曲缓存保存在 `$XDG_CACHE_HOME/lyricify-island/tracks`；未设置时使用 `~/.cache`。
+Windows 上设置保存在 `%APPDATA%\lyricify-island\settings.json`，Spotify 令牌保存在
+`%LOCALAPPDATA%\lyricify-island\spotify-token.json`。
+歌曲缓存保存在 `$XDG_CACHE_HOME/lyricify-island/tracks`；未设置时使用 `~/.cache`，
+Windows 上使用 `%LOCALAPPDATA%\lyricify-island\tracks`。
 
 当前曲目加载完成后，后台预取相邻曲目的歌词、封面和可用的 Spotify 歌手图片；每次只加载一首，
 切歌时取消旧任务并更新范围，同一首播放期间每 30 秒检查一次队列。已缓存内容直接复用，切换歌词源时重新获取对应歌词。
@@ -222,7 +268,8 @@ MPRIS 使用播放器提供的 [TrackList](https://specifications.freedesktop.or
 - `LYRICIFY_CLICK_THROUGH=1`：开启全窗口鼠标穿透；可从设置窗口关闭。
 
 程序在 Linux 上使用 Avalonia 的原生 Wayland 后端，需要在 Wayland 会话中运行。
-窗口由合成器安排位置；自动定位、记住位置和置顶暂未实现。岛屿支持手动拖动和鼠标穿透。
+Linux 上窗口由合成器安排位置；自动定位、记住位置和置顶暂未实现。岛屿支持手动拖动和鼠标穿透。
+Windows 上岛屿自动置于主显示器顶部居中、保持置顶且不抢焦点，透明区域由原生命中测试保持鼠标穿透。
 Fedora 缺少运行依赖时可安装：
 
 ```bash

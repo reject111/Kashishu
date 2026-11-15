@@ -1,7 +1,9 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -38,6 +40,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        WindowsConsole.Attach();
         Options = LaunchOptions.Parse(args);
         if (args.Contains("--self-test"))
             return SelfCheck.Run();
@@ -108,6 +111,12 @@ public sealed class App : Application
     private readonly CancellationTokenSource _shutdown = new();
     private readonly SemaphoreSlim _playbackRestart = new(1, 1);
     private TrayIcon? _trayIcon;
+#if WINDOWS
+    private WindowsTrayIcon? _windowsTrayIcon;
+    private TrayMenuWindow? _trayMenu;
+    private DateTime _trayMenuClosedAt;
+#endif
+    private bool _trayFavoriteBusy;
     private NativeMenuItem? _islandMenuItem;
     private Action? _updateTrayPlayback;
     private HeadphoneService? _headphones;
@@ -162,7 +171,7 @@ public sealed class App : Application
 
             if (Program.Options.LyricsWindow)
                 Dispatcher.UIThread.Post(ShowLyricsWindow);
-            if (Program.Options.Headphones)
+            if (Program.Options.Headphones && HeadphoneService.IsSupported)
                 Dispatcher.UIThread.Post(ShowHeadphones);
 
             if (Program.Options.ExitAfterSeconds is { } seconds)
@@ -182,6 +191,13 @@ public sealed class App : Application
 
     private void CreateTrayIcon(IClassicDesktopStyleApplicationLifetime desktop)
     {
+#if WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            CreateWindowsTrayIcon(desktop);
+            return;
+        }
+#endif
         var favorite = new NativeMenuItem("收藏歌曲") { IsEnabled = false };
         var favoriteBusy = false;
         void UpdateFavorite()
@@ -324,8 +340,11 @@ public sealed class App : Application
         menu.Add(favorite);
         menu.Add(_islandMenuItem);
         menu.Add(new NativeMenuItemSeparator());
-        menu.Add(headphones);
-        menu.Add(noise);
+        if (HeadphoneService.IsSupported)
+        {
+            menu.Add(headphones);
+            menu.Add(noise);
+        }
         menu.Add(settings);
         menu.Add(exit);
 
@@ -343,6 +362,166 @@ public sealed class App : Application
         _trayIcon.Clicked += (_, _) => Dispatcher.UIThread.Post(ShowLyricsWindow);
     }
 
+#if WINDOWS
+    private void CreateWindowsTrayIcon(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        using var iconStream = Assembly.GetExecutingAssembly()
+            .GetManifestResourceStream("LyricifyIsland.icon.png")
+            ?? throw new InvalidOperationException("Embedded tray icon is missing");
+        _appIcon = new WindowIcon(iconStream);
+        _windowsTrayIcon = new WindowsTrayIcon("Lyricify Island",
+            () => Dispatcher.UIThread.Post(ShowLyricsWindow),
+            () => Dispatcher.UIThread.Post(() => ToggleTrayMenu(desktop)));
+        desktop.Exit += (_, _) =>
+        {
+            _trayMenu?.Close();
+            _trayMenu = null;
+            _windowsTrayIcon?.Dispose();
+            _windowsTrayIcon = null;
+        };
+    }
+
+    private void ToggleTrayMenu(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        if (_trayMenu is not null)
+        {
+            _trayMenu.Close();
+            return;
+        }
+
+        // Clicking the tray icon while the menu is open deactivates and closes it first;
+        // ignore the click that follows so the menu does not pop straight back up.
+        if (DateTime.UtcNow - _trayMenuClosedAt < TimeSpan.FromMilliseconds(220))
+            return;
+
+        var menu = new TrayMenuWindow(BuildTrayMenuEntries(desktop), () => BuildTrayMenuEntries(desktop));
+        _trayMenu = menu;
+        menu.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_trayMenu, menu))
+                _trayMenu = null;
+            _trayMenuClosedAt = DateTime.UtcNow;
+        };
+        menu.ShowAtCursor();
+    }
+#endif
+
+    private List<TrayMenuEntry> BuildTrayMenuEntries(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        var entries = new List<TrayMenuEntry>();
+        var snapshot = _store!.Snapshot;
+        if (!Program.Options.Demo && _settings.PlaybackSource == PlaybackSourcePreference.Spotify)
+        {
+            entries.Add(new TrayMenuEntry(
+                snapshot.Controls.IsFavorite == true ? "取消收藏歌曲" : "收藏歌曲",
+                () => _ = ToggleFavoriteFromTrayAsync(),
+                enabled: !_trayFavoriteBusy && snapshot.Track is not null && snapshot.Controls.CanFavorite));
+        }
+
+        entries.Add(new TrayMenuEntry("打开歌词窗口", ShowLyricsWindow));
+        entries.Add(new TrayMenuEntry("显示词岛",
+            () => ApplySettings(_settings with { ShowIsland = !_settings.ShowIsland }, false),
+            check: _settings.ShowIsland, stayOpen: true));
+        entries.Add(TrayMenuEntry.Separator());
+
+        if (HeadphoneService.IsSupported)
+        {
+            entries.Add(new TrayMenuEntry("耳机控制", ShowHeadphones));
+            var state = _headphones!.State;
+            var available = state.IsConnected && !_headphones.IsBusy;
+            var modes = new List<TrayMenuEntry>();
+            foreach (var (mode, label) in new[]
+            {
+                (HeadphoneNoiseMode.Off, "关闭"),
+                (HeadphoneNoiseMode.NoiseCancellation, "降噪"),
+                (HeadphoneNoiseMode.Transparency, "通透"),
+                (HeadphoneNoiseMode.Adaptive, "自适应")
+            })
+            {
+                if (state.Capabilities.NoiseModes.Contains(mode))
+                {
+                    modes.Add(new TrayMenuEntry(label, () => _ = SetNoiseFromTrayAsync(mode, null),
+                        enabled: available, check: state.NoiseMode == mode));
+                }
+            }
+
+            var levels = new List<TrayMenuEntry>();
+            foreach (var (level, label) in new[]
+            {
+                (HeadphoneNoiseLevel.Smart, "智能"),
+                (HeadphoneNoiseLevel.Deep, "深度"),
+                (HeadphoneNoiseLevel.Moderate, "中度"),
+                (HeadphoneNoiseLevel.Light, "轻度")
+            })
+            {
+                if (state.Capabilities.NoiseLevels.Contains(level))
+                {
+                    levels.Add(new TrayMenuEntry(label, () => _ = SetNoiseFromTrayAsync(null, level),
+                        enabled: available && state.NoiseMode == HeadphoneNoiseMode.NoiseCancellation,
+                        check: state.NoiseMode == HeadphoneNoiseMode.NoiseCancellation
+                               && state.NoiseLevel == level));
+                }
+            }
+
+            if (levels.Count > 0)
+                modes.Add(new TrayMenuEntry("降噪强度", children: levels, enabled: available));
+
+            if (modes.Count > 0)
+            {
+                entries.Add(new TrayMenuEntry(
+                    state.IsConnected ? "降噪模式" : "降噪模式（未连接）",
+                    children: modes,
+                    enabled: available));
+            }
+        }
+
+        entries.Add(new TrayMenuEntry("设置", ShowSettings));
+        entries.Add(new TrayMenuEntry("退出", () => desktop.Shutdown()));
+        return entries;
+    }
+
+    private async Task ToggleFavoriteFromTrayAsync()
+    {
+        var snapshot = _store!.Snapshot;
+        if (_trayFavoriteBusy || snapshot.Track is null || !snapshot.Controls.CanFavorite)
+            return;
+        _trayFavoriteBusy = true;
+        try
+        {
+            var error = await ControlPlaybackAsync(new PlaybackCommand(
+                PlaybackAction.Favorite, snapshot.Controls.IsFavorite == true ? 0 : 1, snapshot.Track.Id),
+                _shutdown.Token);
+            if (error is not null)
+                Console.Error.WriteLine($"[favorite] {error}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[favorite] {exception}");
+        }
+        finally
+        {
+            _trayFavoriteBusy = false;
+        }
+    }
+
+    private async Task SetNoiseFromTrayAsync(HeadphoneNoiseMode? mode, HeadphoneNoiseLevel? level)
+    {
+        try
+        {
+            if (!_headphones!.State.IsConnected || _headphones.IsBusy)
+                return;
+            if (mode is { } value)
+                await _headphones.SetNoiseModeAsync(value);
+            else if (level is { } levelValue)
+                await _headphones.SetNoiseLevelAsync(levelValue);
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[headphones] {exception}");
+        }
+    }
+
     private void ShowLyricsWindow() => OpenLyricsWindow(null);
 
     private void OpenLyricsWindow(PanelKind? panel)
@@ -356,7 +535,8 @@ public sealed class App : Application
         else
         {
             _lyricsWindow = new LyricsWindow(_store!, _settings, _appIcon, ControlPlaybackAsync,
-                () => new SettingsPage(_settings, ApplySettings, () => _settings, RefreshCurrentTrack),
+                () => new SettingsPage(_settings, ApplySettings, () => _settings, RefreshCurrentTrack,
+                    () => _store?.Snapshot),
                 () => new BannerPage(_store!, () => _settings),
                 value => ApplySettings(_settings with { ShowTranslation = value }, false),
                 value => ApplySettings(_settings with { ShowIsland = value }, false), _headphones!);
@@ -396,7 +576,8 @@ public sealed class App : Application
         return await source.ControlAsync(command, linked.Token);
     }
 
-    private void ShowHeadphones() => OpenLyricsWindow(PanelKind.Headphones);
+    private void ShowHeadphones() =>
+        OpenLyricsWindow(HeadphoneService.IsSupported ? PanelKind.Headphones : null);
 
     private void ShowSettings() => OpenLyricsWindow(PanelKind.Settings);
 
@@ -470,7 +651,15 @@ public sealed class App : Application
             if (_settings.PlaybackSource == PlaybackSourcePreference.Mpris)
             {
                 _store!.Update(new PlaybackSnapshot(
-                    null, 0, Stopwatch.GetTimestamp(), false, "正在连接 MPRIS…"));
+                    null, 0, Stopwatch.GetTimestamp(), false,
+                    PlatformInfo.LocalPlaybackConnectingStatus));
+#if WINDOWS
+                if (OperatingSystem.IsWindows())
+                {
+                    StartPlaybackSource(new WindowsMediaService(_store, _settings.LyricsSource));
+                    return;
+                }
+#endif
                 StartPlaybackSource(new MprisService(_store, _settings.LyricsSource));
                 return;
             }
@@ -803,6 +992,21 @@ internal static class SelfCheck
         refreshStore.Update(previousPlayback);
         Require(refreshService.RequestCurrentTrackRefresh(), "refresh current track request");
         CheckMpris();
+#if WINDOWS
+        CheckWindowsMedia();
+#endif
+        var baseline = SettingsStore.Normalize(new IslandSettings());
+        var external = baseline with { ShowIsland = false, ShowTranslation = false };
+        var merged = SettingsPage.MergeExternalSettings(baseline with { WidthPercent = 80 }, baseline, external);
+        Require(!merged.ShowIsland && !merged.ShowTranslation && merged.WidthPercent == 80,
+            "settings page preserves header and tray changes");
+        Require(SettingsPage.MergeExternalSettings(external with { ShowTranslation = true }, external, external)
+                .ShowTranslation,
+            "settings page accepts explicit translation changes");
+        Require(new TrayMenuEntry("toggle", check: false, stayOpen: true).StayOpen
+                && new TrayMenuEntry("toggle", check: true, stayOpen: true).StayOpen
+                && !new TrayMenuEntry("command", check: true).StayOpen,
+            "tray toggle lifetime is independent of its checked state");
         CheckFileArtwork();
         CheckSettingsStore();
         CheckTrackCache(track);
@@ -848,6 +1052,40 @@ internal static class SelfCheck
         Console.WriteLine("self-test: ok");
         return 0;
     }
+
+#if WINDOWS
+    private static void CheckWindowsMedia()
+    {
+        var now = new DateTimeOffset(2026, 11, 15, 0, 0, 0, TimeSpan.Zero);
+        Require(WindowsMediaService.CurrentPosition(TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(2),
+                now.AddSeconds(-30), now, true, 1) == 40_000,
+            "Windows sparse timeline updates keep advancing past five seconds");
+        Require(WindowsMediaService.CurrentPosition(TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(2),
+                now.AddSeconds(-30), now, true, 2) == 70_000,
+            "Windows timeline respects playback rate");
+        Require(WindowsMediaService.CurrentPosition(TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(2),
+                now.AddSeconds(-30), now, false, 2) == 10_000
+                && WindowsMediaService.CurrentPosition(TimeSpan.FromSeconds(12), TimeSpan.Zero,
+                    now.AddSeconds(2), now, true, 1) == 12_000
+                && WindowsMediaService.CurrentPosition(TimeSpan.FromSeconds(12), TimeSpan.Zero,
+                    default, now, true, 1) == 12_000,
+            "Windows paused, future and missing timeline timestamps");
+        Require(WindowsMediaService.SeekPosition(3_000, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15))
+                == TimeSpan.FromSeconds(8).Ticks
+                && WindowsMediaService.SeekPosition(-2_000, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15))
+                    == TimeSpan.FromSeconds(5).Ticks
+                && WindowsMediaService.SeekPosition(30_000, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15))
+                    == TimeSpan.FromSeconds(15).Ticks,
+            "Windows seek uses absolute timeline ticks and clamps to the track");
+        Require(WindowsMediaService.RepeatName(Windows.Media.MediaPlaybackAutoRepeatMode.None) == "off"
+                && WindowsMediaService.RepeatName(Windows.Media.MediaPlaybackAutoRepeatMode.List) == "context"
+                && WindowsMediaService.RepeatName(Windows.Media.MediaPlaybackAutoRepeatMode.Track) == "track",
+            "Windows repeat states match the player UI");
+        Require(PlaybackStore.RequiresAttention("本地媒体会话 连接失败：test")
+                && !PlaybackStore.RequiresAttention(PlaybackStore.NoActiveWindowsPlaybackStatus),
+            "Windows connection errors remain visible");
+    }
+#endif
 
     private static void CheckEnglishWordEffects(TrackInfo track, IslandRenderer islandRenderer)
     {
@@ -1130,4 +1368,51 @@ internal static class SelfCheck
         if (!condition)
             throw new InvalidOperationException($"self-test failed: {name}");
     }
+}
+
+/// <summary>
+/// Windows builds are WinExe so no console window lingers. CLI modes still print to the
+/// console that launched them (or to a redirected stdout pipe, as CI uses).
+/// </summary>
+internal static class WindowsConsole
+{
+    private const int StdOutHandle = -11;
+    private const int StdErrHandle = -12;
+    private const uint FileTypeChar = 2;
+
+    public static void Attach()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var stdout = GetStdHandle(StdOutHandle);
+        var hasStdout = stdout != IntPtr.Zero && stdout != new IntPtr(-1);
+        if (!hasStdout && !AttachConsole(-1))
+            return;
+
+        Rebind(StdOutHandle, Console.SetOut);
+        Rebind(StdErrHandle, Console.SetError);
+    }
+
+    private static void Rebind(int which, Action<TextWriter> apply)
+    {
+        var handle = GetStdHandle(which);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+            return;
+        // Only a console handle can be wrapped again. Redirected output is a pipe or a file that
+        // .NET has already bound to the thread pool, and Console.Out already writes to it.
+        if (GetFileType(handle) != FileTypeChar)
+            return;
+        var stream = new FileStream(new SafeFileHandle(handle, ownsHandle: false), FileAccess.Write);
+        apply(new StreamWriter(stream) { AutoFlush = true });
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(int processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetStdHandle(int which);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetFileType(IntPtr handle);
 }

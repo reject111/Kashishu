@@ -118,14 +118,8 @@ internal static class TrackCache
         CacheDirectory(),
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id))) + ".json");
 
-    private static string CacheDirectory()
-    {
-        var cacheHome = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
-        if (string.IsNullOrWhiteSpace(cacheHome) || !Path.IsPathRooted(cacheHome))
-            cacheHome = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache");
-        return Path.Combine(cacheHome, "lyricify-island", "tracks");
-    }
+    private static string CacheDirectory() =>
+        Path.Combine(AppPaths.CacheHome(), "lyricify-island", "tracks");
 
     private sealed class ImmutableByteArrayJsonConverter : JsonConverter<ImmutableArray<byte>>
     {

@@ -55,7 +55,8 @@ internal sealed class LyricsWindow : Window
         LyricsTheme.ApplyCover(null);
         UpdatePalette();
         store.Changed += OnPlaybackChanged;
-        _panel = new PanelHost(createSettings, () => new HeadphonePage(headphones), createBanner);
+        _panel = new PanelHost(createSettings, () => new HeadphonePage(headphones), createBanner,
+            HeadphoneService.IsSupported);
         _panel.Changed += kind =>
         {
             _lyrics.SetPanel(kind);
@@ -140,7 +141,11 @@ internal sealed class LyricsWindow : Window
         _lyrics.InvalidateVisual();
     }
 
-    public void ApplySettings(IslandSettings settings) => _lyrics.ApplySettings(settings);
+    public void ApplySettings(IslandSettings settings)
+    {
+        _lyrics.ApplySettings(settings);
+        _panel.SynchronizeSettings();
+    }
 
     public void OpenPanel(PanelKind kind) => _panel.Open(kind);
 }

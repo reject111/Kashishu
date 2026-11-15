@@ -74,6 +74,7 @@ internal sealed class PanelHost : Grid
     private readonly Func<PanelPage> _createSettings;
     private readonly Func<PanelPage> _createHeadphones;
     private readonly Func<PanelPage> _createBanner;
+    private readonly bool _showHeadphones;
     private readonly Grid _content = new();
     private readonly Grid _pages = new();
     private readonly Segmented<PanelKind> _tabs = new("页面");
@@ -81,11 +82,13 @@ internal sealed class PanelHost : Grid
     private PanelKind? _current;
     private bool _open;
 
-    public PanelHost(Func<PanelPage> createSettings, Func<PanelPage> createHeadphones, Func<PanelPage> createBanner)
+    public PanelHost(Func<PanelPage> createSettings, Func<PanelPage> createHeadphones,
+        Func<PanelPage> createBanner, bool showHeadphones = true)
     {
         _createSettings = createSettings;
         _createHeadphones = createHeadphones;
         _createBanner = createBanner;
+        _showHeadphones = showHeadphones;
         IsVisible = false;
         Background = Brushes.Transparent;
         // Keep the host's hit-test bounds below the header and inside the resize ring.
@@ -93,11 +96,11 @@ internal sealed class PanelHost : Grid
         ClipToBounds = true;
         Focusable = true;
         TextElement.SetForeground(this, LyricsTheme.PrimaryText);
-        TextElement.SetFontFamily(this, new FontFamily("Noto Sans CJK SC"));
+        TextElement.SetFontFamily(this, new FontFamily(PlatformInfo.CjkFontFamily));
         TextElement.SetFontSize(this, 14);
         PanelTheme.Apply(this);
 
-        _tabs.Set([(PanelKind.Settings, "设置"), (PanelKind.Headphones, "耳机控制"), (PanelKind.Banner, "歌曲分享图")], kind => kind == _current);
+        SetTabs(_current);
         _tabs.Changed += kind => Open(kind);
         var back = Ui.Button("返回歌词");
         back.Click += (_, _) => Close();
@@ -124,6 +127,12 @@ internal sealed class PanelHost : Grid
 
     public PanelKind? Current => _open ? _current : null;
 
+    public void SynchronizeSettings()
+    {
+        if (_created.GetValueOrDefault(PanelKind.Settings) is SettingsPage settings)
+            settings.SynchronizeExternalSettings();
+    }
+
     public void Toggle(PanelKind kind)
     {
         if (_open && _current == kind)
@@ -134,6 +143,8 @@ internal sealed class PanelHost : Grid
 
     public void Open(PanelKind kind)
     {
+        if (kind == PanelKind.Headphones && !_showHeadphones)
+            return;
         var wasOpen = _open;
         var previous = wasOpen ? _current : null;
         _open = true;
@@ -162,8 +173,17 @@ internal sealed class PanelHost : Grid
             Motion.Stagger(page.EntranceTargets);
         }
 
-        _tabs.Set([(PanelKind.Settings, "设置"), (PanelKind.Headphones, "耳机控制"), (PanelKind.Banner, "歌曲分享图")], value => value == kind);
+        SetTabs(kind);
         Changed?.Invoke(kind);
+    }
+
+    private void SetTabs(PanelKind? active)
+    {
+        var tabs = new List<(PanelKind, string)> { (PanelKind.Settings, "设置") };
+        if (_showHeadphones)
+            tabs.Add((PanelKind.Headphones, "耳机控制"));
+        tabs.Add((PanelKind.Banner, "歌曲分享图"));
+        _tabs.Set(tabs.ToArray(), value => value == active);
     }
 
     public void Close()

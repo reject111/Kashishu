@@ -17,7 +17,7 @@ internal sealed class HeadphonePage : PanelPage
     private readonly Button _refresh = Ui.Button("刷新");
     private readonly Button _connect = Ui.Button("连接耳机", accent: true);
     private readonly Button _refreshState = Ui.Button("更新状态");
-    private readonly TextBlock _deviceName = Ui.Text("选择你的耳机", 21, FontWeight.SemiBold);
+    private readonly TextBlock _deviceName = Ui.Text("选择你的耳机", 21, Ui.Emphasis);
     private readonly TextBlock _deviceDetail = Ui.Text("先在系统蓝牙设置中完成配对", 13, muted: true);
     private readonly TextBlock _connectionLabel = Ui.Text("未连接", 12, muted: true);
     private readonly Border _connectionDot = new()
@@ -37,11 +37,11 @@ internal sealed class HeadphonePage : PanelPage
     private readonly TextBlock _noiseLevelDescription = Ui.Text("选择适合周围环境的降噪程度", 12, muted: true);
     private readonly Border _noiseNotice;
     private readonly Segmented<int> _spatial = new("空间音频");
-    private readonly TextBlock _spatialTitle = Ui.Text("空间音频", 14, FontWeight.SemiBold);
+    private readonly TextBlock _spatialTitle = Ui.Text("空间音频", 14, Ui.Emphasis);
     private readonly TextBlock _spatialDescription = Ui.Text("调整声音的空间呈现", 12, muted: true);
     private readonly ComboBox _equalizer = Ui.Combo("音效预设");
     private readonly ToggleSwitch _game = Ui.Toggle("游戏模式", false, "开", "关");
-    private readonly TextBlock _gameTitle = Ui.Text("游戏模式", 14, FontWeight.SemiBold);
+    private readonly TextBlock _gameTitle = Ui.Text("游戏模式", 14, Ui.Emphasis);
     private readonly TextBlock _gameDescription = Ui.Text("降低声音延迟", 12, muted: true);
     private readonly ToggleSwitch _gameSound = Ui.Toggle("游戏音效", false, "开", "关");
     private readonly TextBlock _gameSoundDescription = Ui.Text("增强游戏中的声音表现", 12, muted: true);
@@ -67,7 +67,7 @@ internal sealed class HeadphonePage : PanelPage
     private readonly Border _dualDeviceRow;
     private readonly Border _wearDetectionRow;
     private readonly Border _huaweiModelRow;
-    private readonly TextBlock _emptyTitle = Ui.Text("连接后，即可调整聆听体验", 16, FontWeight.SemiBold);
+    private readonly TextBlock _emptyTitle = Ui.Text("连接后，即可调整聆听体验", 16, Ui.Emphasis);
     private readonly TextBlock _emptyDescription = Ui.Text("选择已配对的耳机，查看电量并调整聆听设置。", 13, muted: true);
     private bool _syncing;
     private bool _closed;
@@ -159,16 +159,16 @@ internal sealed class HeadphonePage : PanelPage
         };
 
         // ── 聆听模式 ────────────────────────────────────────────────────────────
-        _noiseLevelRow = ConsoleRow(Ui.Text("降噪强度", 14, FontWeight.SemiBold), _noiseLevelDescription, _noiseLevel);
+        _noiseLevelRow = ConsoleRow(Ui.Text("降噪强度", 14, Ui.Emphasis), _noiseLevelDescription, _noiseLevel);
         _noiseNotice = Ui.Block(Ui.Text("此型号可发送降噪指令，但无法读取当前模式。", 12, muted: true));
         _noiseCard = ConsoleSection("聆听模式", "让声音适应此刻的环境",
             Ui.Block(_noiseModes), _noiseLevelRow, _noiseNotice);
 
         // ── 声音 ────────────────────────────────────────────────────────────────
         _spatialRow = ConsoleRow(_spatialTitle, _spatialDescription, _spatial);
-        _equalizerRow = ConsoleRow(Ui.Text("音效预设", 14, FontWeight.SemiBold), Ui.Text("使用耳机内置的调音风格", 12, muted: true), _equalizer);
+        _equalizerRow = ConsoleRow(Ui.Text("音效预设", 14, Ui.Emphasis), Ui.Text("使用耳机内置的调音风格", 12, muted: true), _equalizer);
         _gameRow = ConsoleRow(_gameTitle, _gameDescription, _game);
-        _gameSoundRow = ConsoleRow(Ui.Text("游戏音效", 14, FontWeight.SemiBold), _gameSoundDescription, _gameSound);
+        _gameSoundRow = ConsoleRow(Ui.Text("游戏音效", 14, Ui.Emphasis), _gameSoundDescription, _gameSound);
         _soundCard = ConsoleSection("声音", "调整耳机支持的音效",
             _spatialRow, _equalizerRow, _gameRow, _gameSoundRow);
 
@@ -198,7 +198,7 @@ internal sealed class HeadphonePage : PanelPage
         // ── 连接偏好 ────────────────────────────────────────────────────────────
         _huaweiModel.ItemsSource = new[] { new Choice<string>("", "自动识别") }
             .Concat(HuaweiHeadphoneCatalog.Profiles.Select(profile => new Choice<string>(profile.ProductId, profile.Name))).ToArray();
-        _huaweiModelRow = SettingBlock(Ui.Text("设备型号", 14, FontWeight.SemiBold),
+        _huaweiModelRow = SettingBlock(Ui.Text("设备型号", 14, Ui.Emphasis),
             Ui.Text("改名后无法识别时选择实际型号；断开控制连接后可更改", 12, muted: true), _huaweiModel);
         ToolTip.SetTip(_connectionMethod, "自动选择服务连接；标准连接使用服务 UUID，兼容连接使用通道 15。更改后下次连接生效。");
         var connectionOptions = new StackPanel
@@ -208,9 +208,9 @@ internal sealed class HeadphonePage : PanelPage
             Children =
             {
                 _huaweiModelRow,
-                SettingBlock(Ui.Text("连接方式", 14, FontWeight.SemiBold),
+                SettingBlock(Ui.Text("连接方式", 14, Ui.Emphasis),
                     Ui.Text("更改后下次连接生效", 12, muted: true), _connectionMethod),
-                SettingBlock(Ui.Text("自动接入", 14, FontWeight.SemiBold),
+                SettingBlock(Ui.Text("自动接入", 14, Ui.Emphasis),
                     Ui.Text("蓝牙连接后自动接入；手动断开后，本次不再自动接入", 12, muted: true), _autoConnect)
             }
         };
@@ -330,7 +330,7 @@ internal sealed class HeadphonePage : PanelPage
     }
 
     private static Border ConsoleRow(string title, string description, Control action) =>
-        ConsoleRow(Ui.Text(title, 14, FontWeight.SemiBold), Ui.Text(description, 12, muted: true), action);
+        ConsoleRow(Ui.Text(title, 14, Ui.Emphasis), Ui.Text(description, 12, muted: true), action);
 
     private static Border ConsoleRow(Control title, Control description, Control action)
     {
@@ -345,7 +345,7 @@ internal sealed class HeadphonePage : PanelPage
         content.Children.Add(new StackPanel
         {
             Spacing = 4,
-            Children = { Ui.Text(title, 19, FontWeight.SemiBold), Ui.Text(description, 12, muted: true) }
+            Children = { Ui.Text(title, 19, Ui.Emphasis), Ui.Text(description, 12, muted: true) }
         });
         foreach (var row in rows)
         {
@@ -658,7 +658,7 @@ internal sealed class HeadphonePage : PanelPage
     private sealed class BatteryView
     {
         private readonly TextBlock _name;
-        private readonly TextBlock _value = Ui.Text("—", 20, FontWeight.SemiBold);
+        private readonly TextBlock _value = Ui.Text("—", 20, Ui.Emphasis);
         private readonly TextBlock _charging = Ui.Text("等待连接", 11, muted: true);
         private readonly ProgressBar _level = new()
         {

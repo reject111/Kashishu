@@ -71,7 +71,9 @@ internal readonly record struct IslandSettings(
     bool BackgroundBlur = false,
     bool EnglishWordEffects = false,
     IslandIconAction LeftIconAction = IslandIconAction.LyricsWindow,
-    IslandIconAction RightIconAction = IslandIconAction.Favorite)
+    IslandIconAction RightIconAction = IslandIconAction.Favorite,
+    bool AcrylicIsland = false,
+    int AcrylicFrameRate = SettingsStore.DefaultAcrylicFrameRate)
 {
     public bool HasSpotifyCredentials =>
         !string.IsNullOrWhiteSpace(SpotifyClientId)
@@ -136,6 +138,9 @@ internal static class SettingsStore
     public const double MinimumBackgroundOpacityPercent = 35d;
     public const double MaximumBackgroundOpacityPercent = 95d;
     public const int DefaultTemporaryHideSeconds = 2;
+    public const int MinimumAcrylicFrameRate = 10;
+    public const int MaximumAcrylicFrameRate = 60;
+    public const int DefaultAcrylicFrameRate = 25;
     public const int MinimumFrameRate = 30;
     public const int MaximumFrameRate = 360;
     public const int UnlimitedFrameRateSliderValue = MaximumFrameRate + 1;
@@ -183,7 +188,9 @@ internal static class SettingsStore
                 data?.BackgroundBlur ?? false,
                 data?.EnglishWordEffects ?? false,
                 data?.LeftIconAction ?? IslandIconAction.LyricsWindow,
-                data?.RightIconAction ?? IslandIconAction.Favorite));
+                data?.RightIconAction ?? IslandIconAction.Favorite,
+                data?.AcrylicIsland ?? false,
+                data?.AcrylicFrameRate ?? DefaultAcrylicFrameRate));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -236,7 +243,9 @@ internal static class SettingsStore
                     BackgroundBlur = settings.BackgroundBlur,
                     EnglishWordEffects = settings.EnglishWordEffects,
                     LeftIconAction = settings.LeftIconAction,
-                    RightIconAction = settings.RightIconAction
+                    RightIconAction = settings.RightIconAction,
+                    AcrylicIsland = settings.AcrylicIsland,
+                    AcrylicFrameRate = settings.AcrylicFrameRate
                 }));
             Secure(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             File.Move(temporary, path, overwrite: true);
@@ -279,6 +288,9 @@ internal static class SettingsStore
     internal static int NormalizeFrameRate(int value) => value <= 0 ? 0
         : Math.Clamp(value, MinimumFrameRate, MaximumFrameRate);
 
+    internal static int NormalizeAcrylicFrameRate(int value) =>
+        Math.Clamp(value, MinimumAcrylicFrameRate, MaximumAcrylicFrameRate);
+
     internal static IslandSettings Normalize(IslandSettings settings)
     {
         var offsets = NormalizeTrackOffsets(settings.TrackOffsetsMs);
@@ -302,6 +314,7 @@ internal static class SettingsStore
                 : PlaybackSourcePreference.Spotify,
             TemporaryHideSeconds = NormalizeTemporaryHideSeconds(settings.TemporaryHideSeconds),
             MaximumFrameRate = NormalizeFrameRate(settings.MaximumFrameRate),
+            AcrylicFrameRate = NormalizeAcrylicFrameRate(settings.AcrylicFrameRate),
             VerticalSync = Enum.IsDefined(settings.VerticalSync) ? settings.VerticalSync : VerticalSyncMode.Enabled,
             LeftIconAction = Enum.IsDefined(settings.LeftIconAction)
                 ? settings.LeftIconAction
@@ -348,14 +361,7 @@ internal static class SettingsStore
         return normalized.Count == 0 ? null : normalized.ToImmutable();
     }
 
-    internal static string ConfigHome()
-    {
-        var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        if (string.IsNullOrWhiteSpace(configHome) || !Path.IsPathRooted(configHome))
-            configHome = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
-        return configHome;
-    }
+    internal static string ConfigHome() => AppPaths.ConfigHome();
 
     private static string ConfigDirectory() => Path.Combine(ConfigHome(), "lyricify-island");
     private static string SettingsPath() => Path.Combine(ConfigDirectory(), "settings.json");
@@ -400,6 +406,8 @@ internal static class SettingsStore
         public bool? EnglishWordEffects { get; init; }
         public IslandIconAction? LeftIconAction { get; init; }
         public IslandIconAction? RightIconAction { get; init; }
+        public bool? AcrylicIsland { get; init; }
+        public int? AcrylicFrameRate { get; init; }
     }
 }
 
@@ -407,6 +415,10 @@ internal static class Autostart
 {
     internal static bool SetEnabled(bool enabled, string? executable = null)
     {
+#if WINDOWS
+        if (OperatingSystem.IsWindows())
+            return SetEnabledWindows(enabled, executable);
+#endif
         if (!OperatingSystem.IsLinux())
             return !enabled;
 
@@ -446,6 +458,38 @@ internal static class Autostart
             return false;
         }
     }
+
+#if WINDOWS
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunValueName = "LyricifyIsland";
+
+    private static bool SetEnabledWindows(bool enabled, string? executable)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKeyPath);
+            if (key is null)
+                throw new IOException("无法打开当前用户的启动项");
+            if (!enabled)
+            {
+                key.DeleteValue(RunValueName, throwOnMissingValue: false);
+                return true;
+            }
+
+            executable ??= Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable))
+                throw new IOException("无法确定程序路径");
+            key.SetValue(RunValueName, $"\"{executable}\"");
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or System.Security.SecurityException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"[autostart] update failed: {exception.Message}");
+            return false;
+        }
+    }
+#endif
 
     internal static string DesktopEntry(string executable) =>
         $"[Desktop Entry]\nType=Application\nName=Lyricify Island\nExec={Quote(executable)}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n";

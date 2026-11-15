@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Styling;
 
@@ -14,6 +15,7 @@ internal static class PanelTheme
     {
         RegisterThemeResources(host);
         RegisterButtonStyles(host);
+        RegisterComboStyles(host);
     }
 
     private static Setter ColourFade() => new(Animatable.TransitionsProperty, new Transitions
@@ -50,6 +52,35 @@ internal static class PanelTheme
         Set(LyricsTheme.Accent, "TextControlBorderBrushFocused", "ComboBoxBorderBrushFocused");
         Set(LyricsTheme.DropDownBackground, "ComboBoxDropDownBackground");
         Set(White(0x28), "ComboBoxDropDownBorderBrush");
+        Set(LyricsTheme.PrimaryText, "ComboBoxForeground", "ComboBoxForegroundPointerOver",
+            "ComboBoxForegroundPressed", "ComboBoxForegroundFocused", "ComboBoxDropDownGlyphForeground",
+            "ComboBoxItemForeground", "ComboBoxItemForegroundPointerOver", "ComboBoxItemForegroundPressed",
+            "ComboBoxItemForegroundSelected", "ComboBoxItemForegroundSelectedPointerOver",
+            "ComboBoxItemForegroundSelectedPressed");
+        // Fluent's default drop-down items are tall, square and tinted with a loud selection bar.
+        Set(Brushes.Transparent, "ComboBoxItemBackground", "ComboBoxItemBorderBrush",
+            "ComboBoxItemBorderBrushPointerOver", "ComboBoxItemBorderBrushPressed",
+            "ComboBoxItemBorderBrushSelected", "ComboBoxItemBorderBrushSelectedPointerOver",
+            "ComboBoxItemBorderBrushSelectedPressed");
+        Set(White(0x14), "ComboBoxItemBackgroundPointerOver");
+        Set(White(0x24), "ComboBoxItemBackgroundPressed");
+        Set(LyricsTheme.NavActive, "ComboBoxItemBackgroundSelected",
+            "ComboBoxItemBackgroundSelectedPointerOver", "ComboBoxItemBackgroundSelectedPressed");
+    }
+
+    private static void RegisterComboStyles(Control host)
+    {
+        var item = new Style(x => x.OfType<ComboBoxItem>())
+        {
+            Setters =
+            {
+                new Setter(TemplatedControl.PaddingProperty, new Thickness(11, 6)),
+                new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(8)),
+                new Setter(TemplatedControl.MinHeightProperty, 32d),
+                new Setter(TemplatedControl.FontSizeProperty, 13d)
+            }
+        };
+        host.Styles.Add(item);
     }
 
     private static void RegisterButtonStyles(Control host)

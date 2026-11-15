@@ -20,6 +20,10 @@ internal static class Ui
         TextWrapping = TextWrapping.Wrap
     };
 
+    /// <summary>Title emphasis. Microsoft YaHei UI only ships Regular and Bold, so SemiBold
+    /// snaps to the heavy Bold face on Windows and makes the UI look blackened.</summary>
+    public static FontWeight Emphasis => OperatingSystem.IsWindows() ? FontWeight.Normal : FontWeight.SemiBold;
+
     /// <summary>A titled group of rows rendered as one frosted panel.</summary>
     public static StackPanel Section(string title, string description, params Control[] rows) => new()
     {
@@ -30,7 +34,7 @@ internal static class Ui
             {
                 Spacing = 3,
                 Margin = new Thickness(4, 0, 0, 0),
-                Children = { Text(title, 19, FontWeight.SemiBold), Text(description, 13, muted: true) }
+                Children = { Text(title, 19, Emphasis), Text(description, 13, muted: true) }
             },
             Group(rows)
         }
@@ -62,7 +66,7 @@ internal static class Ui
     };
 
     public static Border Row(string title, string description, Control action) =>
-        Row(Text(title, 14, FontWeight.SemiBold), Text(description, 12, muted: true), action);
+        Row(Text(title, 14, Emphasis), Text(description, 12, muted: true), action);
 
     public static Border Row(Control title, Control description, Control action)
     {
@@ -107,7 +111,7 @@ internal static class Ui
             BorderBrush = LyricsTheme.CardBorder,
             BorderThickness = new Thickness(accent ? 0 : 1),
             CornerRadius = new CornerRadius(LyricsTheme.PillRadius),
-            FontWeight = accent ? FontWeight.SemiBold : FontWeight.Medium,
+            FontWeight = accent ? Emphasis : FontWeight.Medium,
             VerticalContentAlignment = VerticalAlignment.Center,
             Classes = { accent ? "accent" : "glass" }
         };
@@ -123,6 +127,9 @@ internal static class Ui
             Background = LyricsTheme.InputBackground,
             BorderBrush = LyricsTheme.CardBorder,
             CornerRadius = new CornerRadius(LyricsTheme.ControlRadius),
+            Foreground = LyricsTheme.PrimaryText,
+            FontSize = 13,
+            Padding = new Thickness(12, 0),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center
         };
@@ -150,6 +157,8 @@ internal static class Ui
         {
             Text = text,
             PlaceholderText = placeholder,
+            TextAlignment = TextAlignment.Left,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
             MinHeight = 42,
             Padding = new Thickness(14, 9),
             Background = LyricsTheme.InsetBackground,
@@ -173,7 +182,7 @@ internal static class Ui
         {
             Text = format(value),
             FontSize = 14,
-            FontWeight = FontWeight.SemiBold,
+            FontWeight = Emphasis,
             Foreground = LyricsTheme.PrimaryText,
             TextAlignment = TextAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center

@@ -306,27 +306,47 @@ internal sealed class LyricsTextLayout : IDisposable
 
 internal sealed class LyricsFonts : IDisposable
 {
-    private readonly Dictionary<(string, float, bool), SKFont> _fonts = [];
-    private readonly Dictionary<(string, bool), SKTypeface> _faces = [];
+    private readonly Dictionary<(string, float, bool, bool), SKFont> _fonts = [];
+    private readonly Dictionary<(string, bool, bool), SKTypeface> _faces = [];
+
+    /// <summary>Picks the first installed family; Skia silently substitutes a default face for
+    /// unknown names, so the returned family name is verified before accepting it.</summary>
+    internal static SKTypeface ResolveTypeface(IReadOnlyList<string> families, SKFontStyle style)
+    {
+        foreach (var family in families)
+        {
+            var face = SKTypeface.FromFamilyName(family, style);
+            if (face is null)
+                continue;
+            if (string.Equals(face.FamilyName, family, StringComparison.OrdinalIgnoreCase))
+                return face;
+            face.Dispose();
+        }
+        return SKTypeface.FromFamilyName(null, style);
+    }
 
     public SKFont Get(string text, float size, bool bold, bool japanese = false)
     {
         size = MathF.Round(size * 2) / 2;
         var rune = text.EnumerateRunes().FirstOrDefault();
-        var family = rune.Value >= 0x2e80
-            ? japanese ? "Noto Sans CJK JP" : "Noto Sans CJK SC"
-            : "Montserrat";
-        var key = (family, size, bold);
+        var families = rune.Value >= 0x2e80
+            ? japanese ? PlatformInfo.JapaneseFontCandidates : PlatformInfo.CjkFontCandidates
+            : PlatformInfo.LatinFontCandidates;
+        var key = (families[0], size, bold, japanese);
         if (_fonts.TryGetValue(key, out var font)) return font;
-        var faceKey = (family, bold);
+        var faceKey = (families[0], bold, japanese);
         if (!_faces.TryGetValue(faceKey, out var face))
-            _faces[faceKey] = face = SKTypeface.FromFamilyName(family, bold ? SKFontStyle.Bold : SKFontStyle.Normal);
+            _faces[faceKey] = face = ResolveTypeface(families,
+                bold ? SKFontStyle.Bold : SKFontStyle.Normal);
+        // Windows runners often use 100% scaling; unhinted subpixel text at 11–15 px looks soft
+        // there, while the large lyric lines still look best with linear metrics.
+        var hinted = PlatformInfo.IsWindows && size <= 18;
         font = new SKFont(face, size)
         {
             Edging = SKFontEdging.Antialias,
-            Hinting = SKFontHinting.None,
-            Subpixel = true,
-            LinearMetrics = true
+            Hinting = hinted ? SKFontHinting.Slight : SKFontHinting.None,
+            Subpixel = !hinted,
+            LinearMetrics = !hinted
         };
         _fonts[key] = font;
         return font;
