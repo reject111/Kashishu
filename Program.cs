@@ -75,7 +75,9 @@ internal static class Program
             return WriteSnapshot(Options.SnapshotPath);
 
         AppPaths.MigrateLegacyWindowsBrandData();
+#if WINDOWS
         Autostart.MigrateLegacyWindowsRunEntry();
+#endif
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
