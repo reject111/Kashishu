@@ -7,7 +7,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal enum PausedDisplayMode
 {
@@ -42,6 +42,12 @@ internal enum IslandIconAction
     TemporaryHide
 }
 
+internal enum LyricsLiftMode
+{
+    Stay,
+    Wave
+}
+
 internal readonly record struct IslandSettings(
     double WidthPercent = SettingsStore.DefaultWidthPercent,
     double ScalePercent = SettingsStore.DefaultScalePercent,
@@ -73,7 +79,17 @@ internal readonly record struct IslandSettings(
     IslandIconAction LeftIconAction = IslandIconAction.LyricsWindow,
     IslandIconAction RightIconAction = IslandIconAction.Favorite,
     bool AcrylicIsland = false,
-    int AcrylicFrameRate = SettingsStore.DefaultAcrylicFrameRate)
+    int AcrylicFrameRate = SettingsStore.DefaultAcrylicFrameRate,
+    bool IslandLyricsLift = true,
+    bool WindowLyricsLift = true,
+    LyricsLiftMode IslandLyricsLiftMode = LyricsLiftMode.Stay,
+    LyricsLiftMode WindowLyricsLiftMode = LyricsLiftMode.Stay,
+    int IslandGlowIntensity = SettingsStore.DefaultIslandGlowIntensity,
+    bool AiTranslationEnabled = false,
+    string AiTranslationApiKey = "",
+    string AiTranslationBaseUrl = SettingsStore.DefaultAiTranslationBaseUrl,
+    string AiTranslationModel = SettingsStore.DefaultAiTranslationModel,
+    string AiTranslationLanguage = SettingsStore.DefaultAiTranslationLanguage)
 {
     public bool HasSpotifyCredentials =>
         !string.IsNullOrWhiteSpace(SpotifyClientId)
@@ -123,6 +139,9 @@ internal readonly record struct IslandSettings(
 
 internal static class SettingsStore
 {
+    public const string DefaultAiTranslationBaseUrl = "https://api.openai.com/v1";
+    public const string DefaultAiTranslationModel = "gpt-4o-mini";
+    public const string DefaultAiTranslationLanguage = "简体中文";
     public const double DefaultWidthPercent = 70d;
     public const double MinimumWidthPercent = 40d;
     public const double MaximumWidthPercent = 100d;
@@ -141,6 +160,9 @@ internal static class SettingsStore
     public const int MinimumAcrylicFrameRate = 10;
     public const int MaximumAcrylicFrameRate = 60;
     public const int DefaultAcrylicFrameRate = 25;
+    public const int DefaultIslandGlowIntensity = 4;
+    public const int MinimumIslandGlowIntensity = 1;
+    public const int MaximumIslandGlowIntensity = 5;
     public const int MinimumFrameRate = 30;
     public const int MaximumFrameRate = 360;
     public const int UnlimitedFrameRateSliderValue = MaximumFrameRate + 1;
@@ -164,13 +186,13 @@ internal static class SettingsStore
                 data?.IslandScalePercent ?? DefaultScalePercent,
                 data?.SpotifyClientId ?? string.Empty,
                 data?.SpotifyClientSecret ?? string.Empty,
-                data?.TopOffset ?? EnvironmentInt("LYRICIFY_Y") ?? DefaultTopOffset,
-                data?.LyricsOffsetMs ?? EnvironmentInt("LYRICIFY_OFFSET_MS") ?? 0,
+                data?.TopOffset ?? EnvironmentInt("KASHISHU_Y") ?? DefaultTopOffset,
+                data?.LyricsOffsetMs ?? EnvironmentInt("KASHISHU_OFFSET_MS") ?? 0,
                 data?.ShowTranslation ?? true,
                 data?.BackgroundOpacityPercent ?? DefaultBackgroundOpacityPercent,
                 data?.RememberPosition ?? true,
                 data?.LockPosition ?? false,
-                data?.ClickThrough ?? Environment.GetEnvironmentVariable("LYRICIFY_CLICK_THROUGH") == "1",
+                data?.ClickThrough ?? Environment.GetEnvironmentVariable("KASHISHU_CLICK_THROUGH") == "1",
                 data?.PausedDisplay ?? PausedDisplayMode.HideImmediately,
                 data?.TemporaryHideSeconds ?? DefaultTemporaryHideSeconds,
                 data?.StartOnLogin ?? false,
@@ -190,15 +212,25 @@ internal static class SettingsStore
                 data?.LeftIconAction ?? IslandIconAction.LyricsWindow,
                 data?.RightIconAction ?? IslandIconAction.Favorite,
                 data?.AcrylicIsland ?? false,
-                data?.AcrylicFrameRate ?? DefaultAcrylicFrameRate));
+                data?.AcrylicFrameRate ?? DefaultAcrylicFrameRate,
+                data?.IslandLyricsLift ?? true,
+                data?.WindowLyricsLift ?? true,
+                data?.IslandLyricsLiftMode ?? LyricsLiftMode.Stay,
+                data?.WindowLyricsLiftMode ?? LyricsLiftMode.Stay,
+                data?.IslandGlowIntensity ?? DefaultIslandGlowIntensity,
+                data?.AiTranslationEnabled ?? false,
+                data?.AiTranslationApiKey ?? string.Empty,
+                data?.AiTranslationBaseUrl ?? DefaultAiTranslationBaseUrl,
+                data?.AiTranslationModel ?? DefaultAiTranslationModel,
+                data?.AiTranslationLanguage ?? DefaultAiTranslationLanguage));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
             Console.Error.WriteLine($"[settings] load failed: {exception.Message}");
             return Normalize(new IslandSettings(
-                TopOffset: EnvironmentInt("LYRICIFY_Y") ?? DefaultTopOffset,
-                LyricsOffsetMs: EnvironmentInt("LYRICIFY_OFFSET_MS") ?? 0,
-                ClickThrough: Environment.GetEnvironmentVariable("LYRICIFY_CLICK_THROUGH") == "1"));
+                TopOffset: EnvironmentInt("KASHISHU_Y") ?? DefaultTopOffset,
+                LyricsOffsetMs: EnvironmentInt("KASHISHU_OFFSET_MS") ?? 0,
+                ClickThrough: Environment.GetEnvironmentVariable("KASHISHU_CLICK_THROUGH") == "1"));
         }
     }
 
@@ -245,7 +277,17 @@ internal static class SettingsStore
                     LeftIconAction = settings.LeftIconAction,
                     RightIconAction = settings.RightIconAction,
                     AcrylicIsland = settings.AcrylicIsland,
-                    AcrylicFrameRate = settings.AcrylicFrameRate
+                    AcrylicFrameRate = settings.AcrylicFrameRate,
+                    IslandLyricsLift = settings.IslandLyricsLift,
+                    WindowLyricsLift = settings.WindowLyricsLift,
+                    IslandLyricsLiftMode = settings.IslandLyricsLiftMode,
+                    WindowLyricsLiftMode = settings.WindowLyricsLiftMode,
+                    IslandGlowIntensity = settings.IslandGlowIntensity,
+                    AiTranslationEnabled = settings.AiTranslationEnabled,
+                    AiTranslationApiKey = settings.AiTranslationApiKey,
+                    AiTranslationBaseUrl = settings.AiTranslationBaseUrl,
+                    AiTranslationModel = settings.AiTranslationModel,
+                    AiTranslationLanguage = settings.AiTranslationLanguage
                 }));
             Secure(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             File.Move(temporary, path, overwrite: true);
@@ -285,6 +327,9 @@ internal static class SettingsStore
         ? value
         : DefaultTemporaryHideSeconds;
 
+    internal static int NormalizeIslandGlowIntensity(int value) =>
+        Math.Clamp(value, MinimumIslandGlowIntensity, MaximumIslandGlowIntensity);
+
     internal static int NormalizeFrameRate(int value) => value <= 0 ? 0
         : Math.Clamp(value, MinimumFrameRate, MaximumFrameRate);
 
@@ -300,6 +345,13 @@ internal static class SettingsStore
             ScalePercent = NormalizeScalePercent(settings.ScalePercent),
             SpotifyClientId = settings.SpotifyClientId?.Trim() ?? string.Empty,
             SpotifyClientSecret = settings.SpotifyClientSecret?.Trim() ?? string.Empty,
+            AiTranslationApiKey = settings.AiTranslationApiKey?.Trim() ?? string.Empty,
+            AiTranslationBaseUrl = string.IsNullOrWhiteSpace(settings.AiTranslationBaseUrl)
+                ? DefaultAiTranslationBaseUrl : settings.AiTranslationBaseUrl.Trim().TrimEnd('/'),
+            AiTranslationModel = string.IsNullOrWhiteSpace(settings.AiTranslationModel)
+                ? DefaultAiTranslationModel : settings.AiTranslationModel.Trim(),
+            AiTranslationLanguage = string.IsNullOrWhiteSpace(settings.AiTranslationLanguage)
+                ? DefaultAiTranslationLanguage : settings.AiTranslationLanguage.Trim(),
             TopOffset = NormalizeTopOffset(settings.TopOffset),
             LyricsOffsetMs = NormalizeLyricsOffsetMs(settings.LyricsOffsetMs),
             BackgroundOpacityPercent = NormalizeBackgroundOpacityPercent(settings.BackgroundOpacityPercent),
@@ -322,6 +374,13 @@ internal static class SettingsStore
             RightIconAction = Enum.IsDefined(settings.RightIconAction)
                 ? settings.RightIconAction
                 : IslandIconAction.Favorite,
+            IslandLyricsLiftMode = Enum.IsDefined(settings.IslandLyricsLiftMode)
+                ? settings.IslandLyricsLiftMode
+                : LyricsLiftMode.Stay,
+            WindowLyricsLiftMode = Enum.IsDefined(settings.WindowLyricsLiftMode)
+                ? settings.WindowLyricsLiftMode
+                : LyricsLiftMode.Stay,
+            IslandGlowIntensity = NormalizeIslandGlowIntensity(settings.IslandGlowIntensity),
             DisplayId = string.IsNullOrWhiteSpace(settings.DisplayId) ? null : settings.DisplayId.Trim(),
             WindowX = settings.RememberPosition ? settings.WindowX : null,
             WindowY = settings.RememberPosition ? settings.WindowY : null,
@@ -363,7 +422,7 @@ internal static class SettingsStore
 
     internal static string ConfigHome() => AppPaths.ConfigHome();
 
-    private static string ConfigDirectory() => Path.Combine(ConfigHome(), "lyricify-island");
+    private static string ConfigDirectory() => Path.Combine(ConfigHome(), "kashishu");
     private static string SettingsPath() => Path.Combine(ConfigDirectory(), "settings.json");
 
     private static int? EnvironmentInt(string name) =>
@@ -408,6 +467,16 @@ internal static class SettingsStore
         public IslandIconAction? RightIconAction { get; init; }
         public bool? AcrylicIsland { get; init; }
         public int? AcrylicFrameRate { get; init; }
+        public bool? IslandLyricsLift { get; init; }
+        public bool? WindowLyricsLift { get; init; }
+        public LyricsLiftMode? IslandLyricsLiftMode { get; init; }
+        public LyricsLiftMode? WindowLyricsLiftMode { get; init; }
+        public int? IslandGlowIntensity { get; init; }
+        public bool? AiTranslationEnabled { get; init; }
+        public string? AiTranslationApiKey { get; init; }
+        public string? AiTranslationBaseUrl { get; init; }
+        public string? AiTranslationModel { get; init; }
+        public string? AiTranslationLanguage { get; init; }
     }
 }
 
@@ -424,7 +493,7 @@ internal static class Autostart
         if (!OperatingSystem.IsLinux())
             return !enabled;
 
-        var path = Path.Combine(SettingsStore.ConfigHome(), "autostart", "lyricify-island.desktop");
+        var path = Path.Combine(SettingsStore.ConfigHome(), "autostart", "kashishu.desktop");
         try
         {
             if (!enabled)
@@ -433,8 +502,8 @@ internal static class Autostart
                 return true;
             }
 
-            executable ??= File.Exists("/usr/bin/LyricifyIsland")
-                ? "/usr/bin/LyricifyIsland"
+            executable ??= File.Exists("/usr/bin/Kashishu")
+                ? "/usr/bin/Kashishu"
                 : Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(executable))
                 throw new IOException("无法确定程序路径");
@@ -463,7 +532,25 @@ internal static class Autostart
 
 #if WINDOWS
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunValueName = "LyricifyIsland";
+    private const string RunValueName = "Kashishu";
+
+    internal static void MigrateLegacyWindowsRunEntry()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+            if (key?.GetValue("LyricifyIsland") is not string legacy)
+                return;
+            if (key.GetValue(RunValueName) is null)
+                key.SetValue(RunValueName, legacy);
+            key.DeleteValue("LyricifyIsland", throwOnMissingValue: false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or System.Security.SecurityException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"[migration] could not update auto-start: {exception.Message}");
+        }
+    }
 
     private static bool SetEnabledWindows(bool enabled, string? executable)
     {
@@ -559,7 +646,7 @@ internal static class Autostart
         value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     internal static string DesktopEntry(string executable) =>
-        $"[Desktop Entry]\nType=Application\nName=Lyricify Island\nExec={Quote(executable)}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n";
+        $"[Desktop Entry]\nType=Application\nName=Kashishu\nExec={Quote(executable)}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n";
 
     private static string Quote(string value) =>
         $"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("`", "\\`").Replace("$", "\\$").Replace("%", "%%")}\"";

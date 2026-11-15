@@ -8,7 +8,7 @@ using Avalonia.Media;
 using Avalonia.Media.Transformation;
 using Avalonia.Threading;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal enum PanelKind { Settings, Headphones, Banner }
 

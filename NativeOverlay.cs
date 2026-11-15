@@ -6,7 +6,7 @@ using NWayland.Protocols.ExtBackgroundEffectV1;
 using NWayland.Protocols.Wayland;
 using NWayland.Protocols.XdgShell;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed class NativeOverlay : IDisposable
 {
@@ -150,7 +150,7 @@ internal sealed class NativeOverlay : IDisposable
                 var type = globals.GetType();
                 _compositor = (WlCompositor?)type.GetProperty("WlCompositor", InstanceMembers)?.GetValue(globals);
                 if (_topLevelField?.GetValue(_target) is XdgToplevel topLevel)
-                    topLevel.SetAppId("lyricify-island");
+                    topLevel.SetAppId("kashishu");
                 _manager = null;
                 _effect = null;
                 _checkedManager = false;

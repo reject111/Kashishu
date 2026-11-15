@@ -1,4 +1,4 @@
-namespace LyricifyIsland;
+namespace Kashishu;
 
 // Model IDs, capabilities and wire values checked against Nshpiter/HuaweiPods.
 // See THIRD_PARTY_NOTICES.md for the pinned protocol reference.

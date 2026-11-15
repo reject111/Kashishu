@@ -4,7 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>
 /// Windows counterpart of <see cref="NativeOverlay"/>. Avalonia's transparent window is a

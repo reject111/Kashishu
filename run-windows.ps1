@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-if (-not (Test-Path "$PSScriptRoot\dist\LyricifyIsland.exe")) {
+if (-not (Test-Path "$PSScriptRoot\dist\Kashishu.exe")) {
     & "$PSScriptRoot\build-windows.ps1"
 }
-& "$PSScriptRoot\dist\LyricifyIsland.exe" @args
+& "$PSScriptRoot\dist\Kashishu.exe" @args

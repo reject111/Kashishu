@@ -2,7 +2,7 @@ using System.Reflection;
 using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed class WaylandAccessibility
 {

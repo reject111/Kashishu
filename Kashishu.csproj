@@ -4,8 +4,8 @@
          CLI modes such as self-test and snapshot re-attach to the caller's console in Program.cs. -->
     <OutputType Condition="$([MSBuild]::IsOSPlatform('Windows'))">WinExe</OutputType>
     <OutputType Condition="!$([MSBuild]::IsOSPlatform('Windows'))">Exe</OutputType>
-    <Version>0.1.13</Version>
-    <ApplicationIcon>packaging/lyricify-island.ico</ApplicationIcon>
+    <Version>0.1.14</Version>
+    <ApplicationIcon>packaging/kashishu.ico</ApplicationIcon>
     <!-- Windows needs the WinRT projections for the system media session; other desktop
          platforms keep the plain net10.0 target so the Linux packages build unchanged. -->
     <TargetFramework Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows10.0.19041.0</TargetFramework>
@@ -14,8 +14,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>LyricifyIsland</AssemblyName>
-    <RootNamespace>LyricifyIsland</RootNamespace>
+    <AssemblyName>Kashishu</AssemblyName>
+    <RootNamespace>Kashishu</RootNamespace>
     <!-- The Wayland accessibility bridge uses Avalonia's internal automation root API. -->
     <AvaloniaAccessUnstablePrivateApis>true</AvaloniaAccessUnstablePrivateApis>
     <!-- Avalonia 12's optional analyzers target newer Roslyn; this app has no XAML generation. -->
@@ -30,6 +30,7 @@
     <PackageReference Include="Avalonia.Wayland" Version="12.1.1" />
     <PackageReference Include="Avalonia.Skia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageReference Include="OpenAI" Version="2.15.0" />
     <PackageReference Include="QRCoder" Version="1.7.0" />
     <PackageReference Include="NWayland" Version="0.11.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />
@@ -38,11 +39,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources/Headphones/*.json" LogicalName="LyricifyIsland.Headphones.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Resources/Headphones/*.json" LogicalName="Kashishu.Headphones.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Resources/MacMediaBridge.js" LogicalName="LyricifyIsland.MacMediaBridge.js" />
     <EmbeddedResource Include="Resources/MacTrayIcon.png" LogicalName="LyricifyIsland.MacTrayIcon.png" />
     <EmbeddedResource
       Include="vendor/Lyricify-Lyrics-Helper/Lyricify.Lyrics.Helper/Resources/icon.png"
+      LogicalName="Kashishu.icon.png" />
+    <EmbeddedResource
+      Include="Resources/LyricifyIsland.icon.png"
       LogicalName="LyricifyIsland.icon.png" />
   </ItemGroup>
 

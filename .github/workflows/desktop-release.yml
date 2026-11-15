@@ -25,9 +25,9 @@ jobs:
       - name: Read version
         shell: pwsh
         run: |
-          [xml]$project = Get-Content LyricifyIsland.csproj
+          [xml]$project = Get-Content Kashishu.csproj
           $version = ($project.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1)
-          if (-not $version) { throw 'Version missing from LyricifyIsland.csproj' }
+          if (-not $version) { throw 'Version missing from Kashishu.csproj' }
           "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Install Inno Setup
@@ -39,15 +39,15 @@ jobs:
 
       - name: Self test
         shell: pwsh
-        run: ./dist/LyricifyIsland.exe --self-test
+        run: ./dist/Kashishu.exe --self-test
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LyricifyIsland-Windows-${{ env.VERSION }}-build.${{ github.run_number }}
+          name: Kashishu-Windows-${{ env.VERSION }}-build.${{ github.run_number }}
           path: |
-            dist/LyricifyIsland-Setup-*.exe
-            dist/LyricifyIsland.exe
+            dist/Kashishu-Setup-*.exe
+            dist/Kashishu.exe
           if-no-files-found: error
 
   macos:
@@ -65,9 +65,9 @@ jobs:
 
       - name: Read version
         run: |
-          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' LyricifyIsland.csproj | head -1)
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Kashishu.csproj | head -1)
           if [[ -z "$version" ]]; then
-            echo 'Version missing from LyricifyIsland.csproj' >&2
+            echo 'Version missing from Kashishu.csproj' >&2
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
@@ -96,9 +96,9 @@ jobs:
 
       - name: Read version
         run: |
-          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' LyricifyIsland.csproj | head -1)
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Kashishu.csproj | head -1)
           if [[ -z "$version" ]]; then
-            echo 'Version missing from LyricifyIsland.csproj' >&2
+            echo 'Version missing from Kashishu.csproj' >&2
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
@@ -113,12 +113,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}-build.${{ github.run_number }}
-          name: Lyricify Island ${{ env.VERSION }} (build ${{ github.run_number }})
+          name: Kashishu ${{ env.VERSION }} (build ${{ github.run_number }})
           body: |
             Windows 安装包与 macOS 磁盘映像由 GitHub Actions 自动构建。
 
-            - Windows 安装版：`LyricifyIsland-Setup-${{ env.VERSION }}.exe`（当前用户目录，无需管理员权限）
-            - Windows 便携版：`LyricifyIsland.exe`（单个可执行文件，自带运行时）
+            - Windows 安装版：`Kashishu-Setup-${{ env.VERSION }}.exe`（当前用户目录，无需管理员权限）
+            - Windows 便携版：`Kashishu.exe`（单个可执行文件，自带运行时）
             - macOS：`LyricifyIsland-${{ env.VERSION }}-<架构>.dmg`（内含 `LyricifyIsland.app`）
 
             macOS 构建只有 ad-hoc 签名，未使用 Developer ID 签名，也未公证，因此首次打开会被 Gatekeeper 拦截。
@@ -133,7 +133,7 @@ jobs:
 
             提交：${{ github.sha }}
           files: |
-            dist/LyricifyIsland-Setup-*.exe
-            dist/LyricifyIsland.exe
+            dist/Kashishu-Setup-*.exe
+            dist/Kashishu.exe
             dist/LyricifyIsland-*.dmg
           make_latest: true

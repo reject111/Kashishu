@@ -1,7 +1,7 @@
 #if WINDOWS
 using System.Runtime.InteropServices;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>
 /// Minimal Shell_NotifyIcon wrapper. Avalonia's tray icon only exposes the native Win32
@@ -48,7 +48,7 @@ internal sealed class WindowsTrayIcon : IDisposable
         _wndProc = WindowProc;
         _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
 
-        var className = _className = $"LyricifyIslandTrayWindow.{Environment.ProcessId}";
+        var className = _className = $"KashishuTrayWindow.{Environment.ProcessId}";
         var wc = new WndClassEx
         {
             cbSize = Marshal.SizeOf<WndClassEx>(),

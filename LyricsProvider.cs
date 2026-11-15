@@ -8,7 +8,7 @@ using KugouApi = Lyricify.Lyrics.Providers.Web.Kugou.Api;
 using LrclibApi = Lyricify.Lyrics.Providers.Web.LRCLIB.Api;
 using NeteaseApi = Lyricify.Lyrics.Providers.Web.Netease.Api;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal static class LyricsProvider
 {

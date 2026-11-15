@@ -1,4 +1,4 @@
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>Per-OS defaults shared by rendering, storage and the settings UI.</summary>
 internal static class PlatformInfo
@@ -86,6 +86,34 @@ internal static class AppPaths
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 "Library", "Caches");
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache");
+    }
+
+    /// <summary>The upstream rename moves Windows data from lyricify-island to kashishu.
+    /// Move the old per-user directories once so settings and Spotify authorization survive.</summary>
+    public static void MigrateLegacyWindowsBrandData()
+    {
+        if (!PlatformInfo.IsWindows)
+            return;
+        MigrateBrandDirectory(ConfigHome());
+        MigrateBrandDirectory(StateHome());
+        MigrateBrandDirectory(CacheHome());
+    }
+
+    private static void MigrateBrandDirectory(string home)
+    {
+        var source = Path.Combine(home, "lyricify-island");
+        var destination = Path.Combine(home, "kashishu");
+        if (!Directory.Exists(source) || Directory.Exists(destination))
+            return;
+        try
+        {
+            Directory.CreateDirectory(home);
+            Directory.Move(source, destination);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"[migration] could not move {source}: {exception.Message}");
+        }
     }
 
     private static string? Rooted(string? value) =>

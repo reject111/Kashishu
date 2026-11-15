@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Lyricify Island
+Name=Kashishu
 Comment=Desktop lyrics island for Spotify and MPRIS
 Comment[zh_CN]=支持 Spotify 与 MPRIS 的桌面歌词岛
-Exec=LyricifyIsland
-Icon=lyricify-island
+Exec=Kashishu
+Icon=kashishu
 Terminal=false
 Categories=AudioVideo;Audio;
 StartupNotify=false

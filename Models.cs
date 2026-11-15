@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 public sealed record LyricSyllable(string Text, long StartMs, long EndMs);
 
@@ -9,7 +9,10 @@ public sealed record LyricLine(
     string? Translation,
     long StartMs,
     long EndMs,
-    ImmutableArray<LyricSyllable> Syllables);
+    ImmutableArray<LyricSyllable> Syllables)
+{
+    public bool IsAiTranslation { get; init; }
+}
 
 public sealed record TrackInfo(
     string Id,
@@ -101,8 +104,11 @@ public sealed class PlaybackStore
                 || status.StartsWith("本地媒体会话 ", StringComparison.Ordinal)
                 || status.StartsWith("本地播放器 ", StringComparison.Ordinal));
 
+    private readonly object _updateGate = new();
     private PlaybackSnapshot _snapshot = new(
         null, 0, System.Diagnostics.Stopwatch.GetTimestamp(), false, "正在连接播放信息源…");
+
+    internal Func<TrackInfo?, TrackInfo?>? PrepareTrack { get; set; }
 
     public PlaybackSnapshot Snapshot => Volatile.Read(ref _snapshot);
 
@@ -110,7 +116,28 @@ public sealed class PlaybackStore
 
     public void Update(PlaybackSnapshot snapshot)
     {
-        Volatile.Write(ref _snapshot, snapshot);
+        lock (_updateGate)
+        {
+            var track = PrepareTrack is { } prepare ? prepare(snapshot.Track) : snapshot.Track;
+            Volatile.Write(ref _snapshot, ReferenceEquals(track, snapshot.Track) ? snapshot : snapshot with { Track = track });
+        }
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal void RefreshTrack()
+    {
+        var changed = false;
+        lock (_updateGate)
+        {
+            var snapshot = _snapshot;
+            var track = PrepareTrack is { } prepare ? prepare(snapshot.Track) : snapshot.Track;
+            if (!ReferenceEquals(track, snapshot.Track))
+            {
+                Volatile.Write(ref _snapshot, snapshot with { Track = track });
+                changed = true;
+            }
+        }
+        if (changed)
+            Changed?.Invoke(this, EventArgs.Empty);
     }
 }

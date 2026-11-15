@@ -5,6 +5,12 @@
 The Wayland backend uses [NWayland](https://github.com/AvaloniaUI/NWayland),
 version 0.11.0. Its MIT license is included in `licenses/NWayland-MIT.txt`.
 
+## OpenAI .NET SDK
+
+AI lyrics translation uses [OpenAI .NET](https://github.com/openai/openai-dotnet),
+version 2.15.0, and its Microsoft .NET dependencies. Their MIT licenses are in
+`licenses/OpenAI-MIT.txt` and `licenses/Microsoft-MIT.txt`.
+
 ## OppoPodsManager device metadata
 
 `Resources/Headphones/DeviceModels.json` and `Resources/Headphones/EqModeNames.json`
@@ -20,7 +26,7 @@ license are included in `licenses/OppoPodsManager-GPL-3.0.txt`. Preserve these
 notices and provide the corresponding source data when redistributing them.
 
 The Linux connection service, packet handling, capability reader and Avalonia
-window in this repository are implemented for LyricifyIsland. Protocol behavior
+window in this repository are implemented for Kashishu. Protocol behavior
 was checked against the above desktop project and
 [Leaf-lsgtky/OppoPods](https://github.com/Leaf-lsgtky/OppoPods), commit
 `10a2f04de5911b59b2ed74404602ea46e8741324`. No Android/Xposed integration, upstream

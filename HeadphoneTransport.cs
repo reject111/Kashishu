@@ -3,7 +3,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 // Linux Bluetooth socket ABI; vendor service UUIDs are selected before SDP discovery.
 // Owns only the control socket. Closing it leaves the system audio connection intact.

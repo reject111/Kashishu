@@ -1,4 +1,4 @@
-# Publishes the app and packages dist\LyricifyIsland-Setup-<version>.exe with Inno Setup 6.
+# Publishes the app and packages dist\Kashishu-Setup-<version>.exe with Inno Setup 6.
 param(
     [string]$Version,
     [switch]$SkipBuild
@@ -7,10 +7,10 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 if (-not $Version) {
-    [xml]$project = Get-Content "$PSScriptRoot\LyricifyIsland.csproj"
+    [xml]$project = Get-Content "$PSScriptRoot\Kashishu.csproj"
     $Version = ($project.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1)
 }
-if (-not $Version) { throw 'Version is missing from LyricifyIsland.csproj' }
+if (-not $Version) { throw 'Version is missing from Kashishu.csproj' }
 
 if (-not $SkipBuild) {
     & "$PSScriptRoot\build-windows.ps1"
@@ -26,6 +26,6 @@ if (-not $iscc) {
     throw 'Inno Setup 6 is required: winget install JRSoftware.InnoSetup'
 }
 
-& $iscc "/DAppVersion=$Version" "$PSScriptRoot\installer\LyricifyIsland.iss"
+& $iscc "/DAppVersion=$Version" "$PSScriptRoot\installer\Kashishu.iss"
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed' }
-Write-Host "Built $PSScriptRoot\dist\LyricifyIsland-Setup-$Version.exe"
+Write-Host "Built $PSScriptRoot\dist\Kashishu-Setup-$Version.exe"

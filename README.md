@@ -1,4 +1,4 @@
-# Lyricify Island
+# Kashishu
 
 **原项目由 AI 编写，由大肥鱼完成 Windows/macOS 平台适配**
 
@@ -13,24 +13,30 @@ Windows / macOS / Linux 桌面歌词岛。当前曲目和播放进度可来自 S
 [Lyricify Lyrics Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) 获取和解析。
 字体、逐字裁剪、双层微光、播放头 bloom 与换行动画都在 Skia 自绘层完成，正常桌面运行时由 GPU 渲染。
 
-![Lyricify Island 歌词窗口：封面、播放控件、滚动歌词与翻译](docs/images/lyrics-window.png)
+![Kashishu 歌词窗口：封面、播放控件、滚动歌词与翻译](docs/images/lyrics-window.png)
 
 ## Fedora 安装
 
-Fedora 43、44 和 45 的 x86_64 系统可以从 [COPR 仓库](https://copr.fedorainfracloud.org/coprs/xiaozhangup/LyricifyIsland/)安装：
+Fedora 43、44 和 45 的 x86_64 系统可以从 [COPR 仓库](https://copr.fedorainfracloud.org/coprs/xiaozhangup/Kashishu/)安装：
 
 ```bash
-sudo dnf copr enable xiaozhangup/LyricifyIsland
-sudo dnf install lyricify-island
+sudo dnf copr enable xiaozhangup/Kashishu
+sudo dnf install kashishu
 ```
 
-安装后可从应用菜单启动 Lyricify Island，也可运行 `LyricifyIsland`。RPM 使用系统的 .NET 运行时和 OpenCC；仓库会在 GitHub 的 main 分支推送后重新构建。
+安装后可从应用菜单启动 Kashishu，也可运行 `Kashishu`。RPM 使用系统的 .NET 运行时和 OpenCC；仓库会在 GitHub 的 main 分支推送后重新构建。
+
+旧版 `lyricify-island` 会升级为 `kashishu`。原配置仍保存在 `${XDG_CONFIG_HOME:-$HOME/.config}/lyricify-island`，
+Spotify 授权仍保存在 `${XDG_STATE_HOME:-$HOME/.local/state}/lyricify-island`；如需继续使用，请在首次启动前分别复制到同一父目录下的 `kashishu` 目录。
+升级后首次启动 Kashishu，并在设置中确认登录自启动。
 
 ## Windows 安装
 
 Windows 10 1809 及以上或 Windows 11。从 [Releases](https://github.com/reject111/LyricifyIsland/releases)
-下载 `LyricifyIsland-Setup-<版本>.exe` 安装：默认装到当前用户目录，无需管理员权限，可选桌面快捷方式。
+下载 `Kashishu-Setup-<版本>.exe` 安装：默认装到当前用户目录，无需管理员权限，可选桌面快捷方式。
 每次向 main 分支推送后，GitHub Actions 会自动构建并发布新的 Windows 安装包和 macOS DMG。
+从旧版升级时，首次启动会把 `%APPDATA%\lyricify-island`、`%LOCALAPPDATA%\lyricify-island`
+中的设置、Spotify 授权与缓存迁移到对应的 `kashishu` 目录，并同步迁移登录自启动项。
 
 从源码构建需要 [.NET 10 SDK](https://dotnet.microsoft.com/download) 和 Inno Setup 6
 （`winget install JRSoftware.InnoSetup`）：
@@ -41,8 +47,8 @@ Windows 10 1809 及以上或 Windows 11。从 [Releases](https://github.com/reje
 .\run-windows.ps1
 ```
 
-构建产物 `dist\LyricifyIsland.exe` 是单个可执行文件，自带 .NET 运行时和原生库，启动不要求系统安装 .NET；
-`build-installer.ps1` 会把它打包成 `dist\LyricifyIsland-Setup-<版本>.exe`。
+构建产物 `dist\Kashishu.exe` 是单个可执行文件，自带 .NET 运行时和原生库，启动不要求系统安装 .NET；
+`build-installer.ps1` 会把它打包成 `dist\Kashishu-Setup-<版本>.exe`。
 `run-windows.ps1` 会在首次运行时自动构建。Windows 版使用 Win32 透明置顶窗口与系统媒体会话：
 
 - “本地媒体会话”读取 Windows 的全局媒体控件（SMTC），支持 Spotify、浏览器、系统播放器等
@@ -127,7 +133,7 @@ macOS 上显示为“本地播放器”），直接读取本机播放器，无�
 
 Spotify 模式首次授权时会打开浏览器，请登录并允许读取当前播放状态。刷新令牌只保存在当前用户的状态目录，
 凭据只保存在当前用户的设置文件中；凭据、令牌、构建缓存和发布目录都不会进入 Git。
-发布物 `dist/LyricifyIsland` 是单个可执行文件，自带 .NET 运行时和原生库，启动不要求系统安装 .NET。
+发布物 `dist/Kashishu` 是单个可执行文件，自带 .NET 运行时和原生库，启动不要求系统安装 .NET。
 
 Spotify 开发模式下，还需要在 Dashboard 中把登录所用 Spotify 账号加入应用用户列表。
 程序启动后常驻系统托盘；托盘菜单提供“打开歌词窗口”“收藏歌曲”“显示词岛”开关、
@@ -223,7 +229,7 @@ OPPO 系耳机也提供固定通道 15 的连接选项；华为耳机使用标�
 仅需系统蓝牙服务，无需 root 或另装 Android 模块。
 可在耳机窗口关闭“蓝牙耳机连接后自动接入”，也可手动选择设备连接。主动断开控制后，本次蓝牙连接期间不会自动连回；
 下次系统蓝牙重新连接耳机时会再次自动接入。控制选项保存在
-`$XDG_CONFIG_HOME/lyricify-island/headphones.json`（默认 `~/.config/lyricify-island/headphones.json`）。
+`$XDG_CONFIG_HOME/kashishu/headphones.json`（默认 `~/.config/kashishu/headphones.json`）。
 
 连接和协议参考 [OppoPodsManager](https://github.com/Zhaoyi-ya/OppoPodsManager) 与
 [OppoPods](https://github.com/Leaf-lsgtky/OppoPods)。内置 137 条机型数据，实际功能取决于耳机型号、
@@ -268,15 +274,15 @@ FreeClip、FreeArc 和眼镜不显示降噪选项；眼镜只显示左右镜腿�
 ```bash
 ./run.sh --demo
 ./run.sh --demo --lyrics-window
-./dist/LyricifyIsland --self-test
-./dist/LyricifyIsland --snapshot /tmp/lyricify-island.png
-./dist/LyricifyIsland --snapshot /tmp/lyricify-lyrics-window.png --lyrics-window
-./dist/LyricifyIsland --snapshot /tmp/banner-wide.png --banner
-./dist/LyricifyIsland --snapshot /tmp/banner-tall.png --banner --portrait
+./dist/Kashishu --self-test
+./dist/Kashishu --snapshot /tmp/kashishu.png
+./dist/Kashishu --snapshot /tmp/kashishu-lyrics-window.png --lyrics-window
+./dist/Kashishu --snapshot /tmp/banner-wide.png --banner
+./dist/Kashishu --snapshot /tmp/banner-tall.png --banner --portrait
 ```
 
 `--demo --exit-after 5` 可用于五秒启动冒烟检查。Windows 上把 `./run.sh` 换成
-`.\run-windows.ps1`（或 `.\dist\LyricifyIsland.exe`），macOS 上换成 `./run-macos.sh`
+`.\run-windows.ps1`（或 `.\dist\Kashishu.exe`），macOS 上换成 `./run-macos.sh`
 （或 `./dist/LyricifyIsland`），输出路径换成对应平台的路径即可。
 
 ## 调整
@@ -298,6 +304,7 @@ FreeClip、FreeArc 和眼镜不显示降噪选项；眼镜只显示左右镜腿�
 - 歌词时间偏移：全局偏移范围为 -2000–2000 毫秒，正值提前、负值延后。
 - 每首歌曲偏移：可单独开关；启用后从灵动岛右键菜单调整当前歌曲，并在设置页管理已保存歌曲。
 - 歌词源：可选自动、网易云、酷狗或 LRCLIB；也可重新获取当前歌曲。
+- 翻译：在“歌词”下方的“翻译”板块开关译文显示，或启用 AI 歌词翻译。选择语言后立即保存，输入框在按回车或离开时自动保存。Base URL 默认为 `https://api.openai.com/v1`，模型默认为 `gpt-4o-mini`，支持 OpenAI 兼容服务。整首歌词没有现成译文时，应用才会把原文发送到配置的服务。词岛中的 AI 译文右侧显示“AI”。
 - 交互：锁定拖动或让整个岛屿穿透鼠标；整窗穿透可在 Linux 和 macOS 上开启，Windows 上透明区域始终可穿透。
 - 暂停行为：立即隐藏、3 秒后隐藏或保持显示；通过岛屿单击暂停时始终保留并收窄，连接和错误提示不会被隐藏。
 - 临时隐藏：可选 2、5、10 或 30 秒。
@@ -307,16 +314,18 @@ FreeClip、FreeArc 和眼镜不显示降噪选项；眼镜只显示左右镜腿�
 - 播放信息源：可在 Spotify Web API 与本地播放器之间切换；Windows 上本地来源为系统媒体会话，
   macOS 上为 Spotify / Music。
 - Spotify Client ID 和 Client Secret：点击保存后重新连接，Secret 在界面中遮蔽显示。
-- 缓存：显示歌词、封面和歌曲信息缓存占用，并可一键清理。
+- 缓存：分别显示本地缓存和 AI 翻译缓存的占用。使用“清理缓存”清理原始歌词、封面和歌曲信息，使用“清理翻译缓存”清理已保存的 AI 译文。
 
-设置保存在 `$XDG_CONFIG_HOME/lyricify-island/settings.json`；未设置 `XDG_CONFIG_HOME` 时使用
-`~/.config/lyricify-island/settings.json`。Linux 下设置目录权限为 `0700`，文件权限为 `0600`。
-Windows 上设置保存在 `%APPDATA%\lyricify-island\settings.json`，Spotify 令牌保存在
-`%LOCALAPPDATA%\lyricify-island\spotify-token.json`。
-macOS 上设置和 Spotify 令牌保存在 `~/Library/Application Support/lyricify-island/`。
-歌曲缓存保存在 `$XDG_CACHE_HOME/lyricify-island/tracks`；未设置时使用 `~/.cache`，
-Windows 上使用 `%LOCALAPPDATA%\lyricify-island\tracks`，macOS 上使用
-`~/Library/Caches/lyricify-island/tracks`。
+设置保存在 `$XDG_CONFIG_HOME/kashishu/settings.json`；未设置 `XDG_CONFIG_HOME` 时使用
+`~/.config/kashishu/settings.json`。Linux 下设置目录权限为 `0700`，文件权限为 `0600`。
+Windows 上设置保存在 `%APPDATA%\kashishu\settings.json`，Spotify 令牌保存在
+`%LOCALAPPDATA%\kashishu\spotify-token.json`。
+macOS 上设置和 Spotify 令牌保存在 `~/Library/Application Support/kashishu/`。
+歌曲缓存保存在 `$XDG_CACHE_HOME/kashishu/tracks`；未设置时使用 `~/.cache`，
+Windows 上使用 `%LOCALAPPDATA%\kashishu\tracks`，macOS 上使用
+`~/Library/Caches/kashishu/tracks`。
+AI 翻译缓存在歌曲缓存的 `translations` 子目录中，按原始歌词和目标语言复用，不设过期时间；歌词或目标语言变化时分别缓存。
+API Key 保存在上述本机设置文件中。
 
 当前曲目加载完成后，后台预取相邻曲目的歌词、封面和可用的 Spotify 歌手图片；每次只加载一首，
 切歌时取消旧任务并更新范围，同一首播放期间每 30 秒检查一次队列。已缓存内容直接复用，切换歌词源时重新获取对应歌词。
@@ -330,8 +339,8 @@ MPRIS 使用播放器提供的 [TrackList](https://specifications.freedesktop.or
 
 以下环境变量只用于旧配置迁移：对应字段还没有写入设置文件时才会读取。
 
-- `LYRICIFY_OFFSET_MS=0`：歌词同步偏移，正数提前、负数延后。
-- `LYRICIFY_CLICK_THROUGH=1`：开启全窗口鼠标穿透；可从设置窗口关闭。
+- `KASHISHU_OFFSET_MS=0`：歌词同步偏移，正数提前、负数延后。
+- `KASHISHU_CLICK_THROUGH=1`：开启全窗口鼠标穿透；可从设置窗口关闭。
 
 程序在 Linux 上使用 Avalonia 的原生 Wayland 后端，需要在 Wayland 会话中运行。
 Linux 上窗口由合成器安排位置；自动定位、记住位置和置顶暂未实现。岛屿支持手动拖动和鼠标穿透。

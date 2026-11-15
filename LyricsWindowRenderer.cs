@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using Avalonia;
 using SkiaSharp;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal enum LyricsWindowAction
 {
@@ -33,6 +33,8 @@ internal sealed record LyricsWindowFrame(
     public double PanelProgress { get; init; }
     public PanelKind? ActivePanel { get; init; }
     public bool EnglishWordEffects { get; init; }
+    public bool LyricsLift { get; init; } = true;
+    public LyricsLiftMode LyricsLiftMode { get; init; } = LyricsLiftMode.Stay;
 }
 
 internal sealed record LyricsWindowLayout(Rect Surface, Rect Lyrics, Rect Cover, Rect Progress,
@@ -160,8 +162,8 @@ internal sealed class LyricsWindowRenderer : IDisposable
     private double _coverScale = 1;
     private bool _controlsAnimating;
     private bool _isAnimating = true;
-    private SKColor _colorA = new(57, 80, 102);
-    private SKColor _colorB = new(76, 51, 75);
+    private SKColor _colorA = LyricsTheme.DefaultColorA;
+    private SKColor _colorB = LyricsTheme.DefaultColorB;
     private int _references = 1;
 
     public double ScrollTarget => Volatile.Read(ref _scrollTarget);
@@ -374,8 +376,8 @@ internal sealed class LyricsWindowRenderer : IDisposable
             _coverImage = _cover is null ? null : SKImage.FromBitmap(_cover);
             _backdrop?.Dispose();
             _backdrop = null;
-            _colorA = new SKColor(57, 80, 102);
-            _colorB = new SKColor(76, 51, 75);
+            _colorA = LyricsTheme.DefaultColorA;
+            _colorB = LyricsTheme.DefaultColorB;
             if (_cover is not null)
             {
                 using var small = SKSurface.Create(new SKImageInfo(64, 64));
@@ -492,7 +494,7 @@ internal sealed class LyricsWindowRenderer : IDisposable
             brandOpacity = DrawHeadphoneButton(canvas, frame, headphones, x);
         else
             _headphoneExpansion = _headphoneNoiseExpansion = 0;
-        Label(canvas, "Lyricify", OperatingSystem.IsMacOS() ? 96 : 36, 27 + headerOffset, 14,
+        Label(canvas, "Kashishu", OperatingSystem.IsMacOS() ? 96 : 36, 27 + headerOffset, 14,
             White((byte)(165 * brandOpacity)), 160, true);
         return;
 
@@ -602,7 +604,7 @@ internal sealed class LyricsWindowRenderer : IDisposable
                 + index * (HeadphoneShortcutSize + HeadphoneControlGap), 24, HeadphoneShortcutSize, 26);
             var enabled = !headphones.Busy && headphones.NoiseModes.Contains(mode) && _headphoneNoiseExpansion > .9;
             var motion = AnimateControl(action, bounds.Intersect(revealed), frame, enabled, headphones.NoiseMode == mode);
-            using var selected = Paint((_cover is null ? new SKColor(137, 212, 162) : LyricsTheme.CoverAccent(_colorA, _colorB)).WithAlpha(
+            using var selected = Paint(LyricsTheme.CoverAccent(_colorA, _colorB).WithAlpha(
                 (byte)(32 * motion.Active * (.35 + .65 * motion.Enabled) * _headphoneNoiseExpansion)));
             canvas.DrawRoundRect(ToSk(bounds), 8, 8, selected);
             using var hover = Paint(White((byte)((12 * motion.Hover + 16 * motion.Pressed) * _headphoneNoiseExpansion)));
@@ -657,7 +659,7 @@ internal sealed class LyricsWindowRenderer : IDisposable
             Label(canvas, track is null ? "在播放器中播放一首歌" : string.Join(" / ", track.Artists),
                 tx, ty + 33 * playerScale, 15 * playerScale, White(150), tw);
             if (layout.Compact)
-                Label(canvas, track?.Album ?? "Lyricify Island", tx, ty + 58 * playerScale, 11 * playerScale, White(94), tw);
+                Label(canvas, track?.Album ?? "Kashishu", tx, ty + 58 * playerScale, 11 * playerScale, White(94), tw);
             canvas.Restore();
         }
         var controls = frame.Snapshot.Controls;
@@ -852,7 +854,8 @@ internal sealed class LyricsWindowRenderer : IDisposable
                 canvas.ClipRect(rowBounds);
                 canvas.SaveLayer(rowBounds, layer);
             }
-            DrawRowText(canvas, row, frame.LyricsPositionMs, row.Emphasis, browseEmphasis);
+            DrawRowText(canvas, row, frame.LyricsPositionMs, row.Emphasis, browseEmphasis,
+                frame.LyricsLift, frame.LyricsLiftMode);
             if (blurFilter is not null) canvas.Restore();
             canvas.Restore();
         }
@@ -910,7 +913,7 @@ internal sealed class LyricsWindowRenderer : IDisposable
             using var paint = Paint(SKColors.White);
             paint.ImageFilter = filter;
             surface.Canvas.SaveLayer(new SKRect(-20, -20, width + 20, height + 20), paint);
-            DrawRowText(surface.Canvas, row, 0, 0, 0);
+            DrawRowText(surface.Canvas, row, 0, 0, 0, false, LyricsLiftMode.Stay);
             surface.Canvas.Restore();
             row.IdleImage = surface.Snapshot();
             row.IdleImageKey = key;
@@ -929,7 +932,8 @@ internal sealed class LyricsWindowRenderer : IDisposable
         }
     }
 
-    private void DrawRowText(SKCanvas canvas, Row row, double position, double emphasis, double browseEmphasis)
+    private void DrawRowText(SKCanvas canvas, Row row, double position, double emphasis, double browseEmphasis,
+        bool lyricsLift, LyricsLiftMode lyricsLiftMode)
     {
         if (row.Reflows && _lyricsOnlyProgress is > 0 and < 1)
         {
@@ -940,7 +944,7 @@ internal sealed class LyricsWindowRenderer : IDisposable
             return;
         }
         DrawLyricText(canvas, row.Normal.Text, row.LyricsOnly.Text, _lyricsOnlyProgress,
-            position, emphasis, browseEmphasis);
+            position, emphasis, browseEmphasis, lyricsLift, lyricsLiftMode);
         if (row.Normal.Translation is not null && row.LyricsOnly.Translation is not null)
         {
             var opacity = 72 + emphasis * 105;
@@ -957,7 +961,8 @@ internal sealed class LyricsWindowRenderer : IDisposable
             using var blend = Paint(White((byte)Math.Round(opacity * 255)));
             canvas.SaveLayer(new SKRect(-20, -20, width * scale + 20, layout.Height * scale + 20), blend);
             canvas.Scale(scale);
-            DrawLyricText(canvas, layout.Text, layout.Text, 0, position, emphasis, browseEmphasis);
+            DrawLyricText(canvas, layout.Text, layout.Text, 0, position, emphasis, browseEmphasis,
+                lyricsLift, lyricsLiftMode);
             if (layout.Translation is not null)
             {
                 var alpha = 72 + emphasis * 105;
@@ -1018,51 +1023,190 @@ internal sealed class LyricsWindowRenderer : IDisposable
 
     private static readonly SKMaskFilter LyricGlowFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 2.5f);
 
+    internal static double GlyphLiftProgress(
+        double positionMs,
+        double startMs,
+        double endMs,
+        double syllableDurationMs = 0,
+        LyricsLiftMode mode = LyricsLiftMode.Stay)
+    {
+        if (positionMs <= startMs)
+            return 0d;
+        if (mode == LyricsLiftMode.Stay)
+            return 1d - Math.Exp(-(positionMs - startMs) / 650d);
+
+        if (endMs <= startMs)
+            return 0d;
+        if (positionMs <= endMs)
+        {
+            var progress = Math.Clamp((positionMs - startMs) / (endMs - startMs), 0d, 1d);
+            return 1d - Math.Pow(1d - progress, 2.2d);
+        }
+        var referenceDuration = syllableDurationMs > 0 ? syllableDurationMs : endMs - startMs;
+        var holdMs = Math.Clamp(referenceDuration * 0.35d, 90d, 200d);
+        var afterMs = positionMs - endMs;
+        if (afterMs <= holdMs)
+            return 1d;
+        var releaseMs = Math.Clamp(referenceDuration * 0.95d, 320d, 560d);
+        var releaseElapsed = afterMs - holdMs;
+        if (releaseElapsed >= releaseMs)
+            return 0d;
+        return 0.5d * (1d + Math.Cos(releaseElapsed / releaseMs * Math.PI));
+    }
+
+    internal static (float Trail, float Lead, float EntryFactor, float GlowFactor) GlyphHighlightState(
+        double progress, float glyphWidth, float effectOffset, float effectWidth, double liftProgress)
+    {
+        if (progress <= 0 || effectWidth <= 0)
+            return (-1f, 0f, 0f, 0f);
+        var bleedWidth = Math.Clamp(effectWidth * .42f, 18f, 32f);
+        var trailWidth = Math.Clamp(effectWidth * .18f, 6f, 10f);
+        var front = (float)Math.Clamp(progress, 0d, 1d) * effectWidth;
+        var entryFactor = (float)SmoothStep(Math.Clamp(front / 10f, 0f, 1f));
+        var endRemaining = Math.Clamp((effectWidth - front) / trailWidth, 0f, 1f);
+        var effectTrail = front - trailWidth * endRemaining;
+        var effectLead = (front + bleedWidth) * entryFactor;
+        var trail = effectTrail - effectOffset;
+        var lead = effectLead - effectOffset;
+        if (lead <= 0f)
+            return (trail, lead, 0f, 0f);
+        var glyphCoverage = (float)SmoothStep(Math.Clamp(lead / Math.Max(1f, glyphWidth), 0f, 1f));
+        var glowFactor = (float)Math.Clamp(Math.Max(liftProgress, glyphCoverage * 0.65f) * entryFactor, 0d, 1d);
+        return (trail, lead, entryFactor, glowFactor);
+    }
+
+    internal static (float Trail, float Lead, float EntryFactor) LineHighlightSweep(
+        LyricsTextLayout text, double position)
+    {
+        if (text.Glyphs.Count == 0)
+            return (-1f, 0f, 0f);
+        var firstGlyph = text.Glyphs[0];
+        var lastGlyph = text.Glyphs[^1];
+        var lineStartX = firstGlyph.LineX;
+        var lineEndX = lastGlyph.LineX + lastGlyph.Width;
+        if (position <= firstGlyph.StartMs)
+            return (lineStartX - 1f, lineStartX, 0f);
+        var bleedWidth = Math.Clamp(text.FontSize * 0.78f, 22f, 34f);
+        if (lastGlyph.EndMs <= firstGlyph.StartMs || position >= lastGlyph.EndMs)
+            return (lineEndX, lineEndX + bleedWidth, 1f);
+
+        var frontX = lineStartX;
+        var prevEndMs = firstGlyph.StartMs;
+        var prevEndX = lineStartX;
+        for (var i = 0; i < text.Glyphs.Count; i++)
+        {
+            var g = text.Glyphs[i];
+            var groupStartX = g.LineX - g.EffectOffset;
+            var groupEndX = groupStartX + g.EffectWidth;
+            if (position < g.StartMs)
+            {
+                if (position > prevEndMs && g.StartMs > prevEndMs && groupStartX > prevEndX)
+                {
+                    var gapT = (position - prevEndMs) / (g.StartMs - prevEndMs);
+                    frontX = Math.Max(frontX, prevEndX + (float)gapT * (groupStartX - prevEndX));
+                }
+                break;
+            }
+            if (position <= g.EndMs && g.EndMs > g.StartMs)
+            {
+                var rawP = Math.Clamp((position - g.StartMs) / (g.EndMs - g.StartMs), 0d, 1d);
+                var p = 0.65d * rawP + 0.35d * SmoothStep(rawP);
+                frontX = Math.Max(frontX, groupStartX + (float)p * g.EffectWidth);
+                break;
+            }
+            frontX = Math.Max(frontX, groupEndX);
+            prevEndMs = g.EndMs;
+            prevEndX = groupEndX;
+        }
+
+        var trailWidth = Math.Clamp(text.FontSize * 0.22f, 6f, 10f);
+        var advance = Math.Max(0f, frontX - lineStartX);
+        var entryFactor = (float)SmoothStep(Math.Clamp(advance / 10f, 0f, 1f));
+        var endRemaining = Math.Clamp((lineEndX - frontX) / trailWidth, 0f, 1f);
+        var trail = frontX - trailWidth * endRemaining;
+        var lead = lineStartX + (frontX - lineStartX + bleedWidth) * entryFactor;
+        return (trail, lead, entryFactor);
+    }
+
+    private static double SmoothStep(double value) => value * value * (3d - 2d * value);
+
     private static void DrawLyricText(SKCanvas canvas, LyricsTextLayout text, LyricsTextLayout expanded,
-        double layoutProgress, double position, double emphasis, double browseEmphasis)
+        double layoutProgress, double position, double emphasis, double browseEmphasis,
+        bool lyricsLift, LyricsLiftMode lyricsLiftMode)
     {
         if (layoutProgress == 1) { text = expanded; layoutProgress = 0; }
         var scale = (float)Mix(1, expanded.FontSize / text.FontSize, layoutProgress);
         var idleOpacity = 67 + emphasis * 26;
         using var idle = Paint(White((byte)(idleOpacity + (155 - idleOpacity) * browseEmphasis)));
-        using var bright = Paint(White((byte)(230 * emphasis)));
-        using var glow = Paint(White((byte)(60 * emphasis)));
+        var brightAlpha = (byte)Math.Round(230 * emphasis);
+        using var bright = Paint(White(brightAlpha));
+        using var glow = Paint(White((byte)Math.Round(60 * emphasis)));
         glow.MaskFilter = LyricGlowFilter;
+        (float Trail, float Lead, float EntryFactor) sweep = emphasis > .005
+            ? LineHighlightSweep(text, position)
+            : (-1f, 0f, 0f);
         var count = Math.Min(text.Glyphs.Count, expanded.Glyphs.Count);
         for (var i = 0; i < count; i++)
         {
             var glyph = text.Glyphs[i];
             var target = expanded.Glyphs[i];
-            var progress = glyph.EndMs <= glyph.StartMs ? (position >= glyph.StartMs ? 1 : 0)
-                : Math.Clamp((position - glyph.StartMs) / (glyph.EndMs - glyph.StartMs), 0, 1);
-            var singing = position >= glyph.StartMs && position <= glyph.EndMs;
-            var lift = singing ? (float)(Math.Sin(progress * Math.PI) * Math.Min(3.0, glyph.SyllableDurationMs / 650) * emphasis) : 0;
+            var liftProgress = GlyphLiftProgress(
+                position, glyph.StartMs, glyph.EndMs, glyph.SyllableDurationMs, lyricsLiftMode);
+            var lift = lyricsLift
+                ? (float)(liftProgress * 3.0 * emphasis)
+                : 0f;
             canvas.Save();
             canvas.Translate((float)Mix(glyph.X, target.X, layoutProgress),
                 (float)Mix(glyph.Baseline, target.Baseline, layoutProgress) - lift);
             canvas.Scale(scale);
             canvas.DrawPath(glyph.Path, idle);
-            if (progress > 0 && emphasis > .005)
+            var localTrail = sweep.Trail - glyph.LineX;
+            var localLead = sweep.Lead - glyph.LineX;
+            if (localLead > 0f && emphasis > .005)
             {
-                var edge = (float)progress * glyph.EffectWidth - glyph.EffectOffset;
-                if (singing && glyph.SyllableDurationMs > 450) canvas.DrawPath(glyph.Path, glow);
-                if (progress < 1)
+                if (localTrail >= glyph.Width)
                 {
-                    if (edge > -3)
+                    if (glyph.SyllableDurationMs > 450 && liftProgress > .005)
                     {
-                        if (edge - 5 >= glyph.Width)
-                            canvas.DrawPath(glyph.Path, bright);
-                        else
+                        var glowAlpha = (byte)Math.Round(60 * emphasis * liftProgress);
+                        if (glowAlpha > 0)
                         {
-                            using var shader = SKShader.CreateLinearGradient(new SKPoint(edge - 5, 0), new SKPoint(edge + 3, 0),
-                                [White((byte)(240 * emphasis)), SKColors.Transparent], null, SKShaderTileMode.Clamp);
-                            bright.Shader = shader;
-                            canvas.DrawPath(glyph.Path, bright);
-                            bright.Shader = null;
+                            glow.Color = White(glowAlpha);
+                            canvas.DrawPath(glyph.Path, glow);
                         }
                     }
+                    canvas.DrawPath(glyph.Path, bright);
                 }
-                else canvas.DrawPath(glyph.Path, bright);
+                else
+                {
+                    var entryAlpha = (byte)Math.Round(brightAlpha * sweep.EntryFactor);
+                    if (entryAlpha > 0)
+                    {
+                        var glowAlpha = (byte)Math.Round(60 * emphasis * sweep.EntryFactor);
+                        if (glowAlpha > 0)
+                        {
+                            using var glowShader = SKShader.CreateLinearGradient(
+                                new SKPoint(localTrail, 0),
+                                new SKPoint(localLead, 0),
+                                [White(glowAlpha), SKColors.Transparent],
+                                null,
+                                SKShaderTileMode.Clamp);
+                            glow.Color = SKColors.White;
+                            glow.Shader = glowShader;
+                            canvas.DrawPath(glyph.Path, glow);
+                            glow.Shader = null;
+                        }
+                        using var shader = SKShader.CreateLinearGradient(
+                            new SKPoint(localTrail, 0),
+                            new SKPoint(localLead, 0),
+                            [White(entryAlpha), SKColors.Transparent],
+                            null,
+                            SKShaderTileMode.Clamp);
+                        bright.Shader = shader;
+                        canvas.DrawPath(glyph.Path, bright);
+                        bright.Shader = null;
+                    }
+                }
             }
             canvas.Restore();
         }

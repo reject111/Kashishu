@@ -2,7 +2,7 @@
 using System.Runtime.InteropServices;
 using SkiaSharp;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>
 /// Grabs the desktop pixels under the island. The island window hides itself from screen

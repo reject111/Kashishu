@@ -7,7 +7,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>One row of the custom tray menu, rebuilt from live app state each time it opens.</summary>
 internal sealed class TrayMenuEntry

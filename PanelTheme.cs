@@ -6,7 +6,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Styling;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>Gives stock Avalonia controls the lyrics-window look inside the panel host.</summary>
 internal static class PanelTheme

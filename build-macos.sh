@@ -14,7 +14,7 @@ esac
 git -C "$project_dir" submodule update --init --recursive
 command -v dotnet >/dev/null || { echo 'dotnet SDK is required' >&2; exit 1; }
 
-dotnet publish "$project_dir/LyricifyIsland.csproj" \
+dotnet publish "$project_dir/Kashishu.csproj" \
   --configuration Release \
   --runtime "$runtime" \
   --self-contained true \
@@ -23,13 +23,13 @@ dotnet publish "$project_dir/LyricifyIsland.csproj" \
   -p:DebugType=None \
   --output "$publish_dir"
 
-version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$project_dir/LyricifyIsland.csproj" | head -1)"
-[[ -n "$version" ]] || { echo 'Version missing from LyricifyIsland.csproj' >&2; exit 1; }
+version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$project_dir/Kashishu.csproj" | head -1)"
+[[ -n "$version" ]] || { echo 'Version missing from Kashishu.csproj' >&2; exit 1; }
 
 app="$project_dir/dist/LyricifyIsland.app"
 rm -rf -- "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Helpers"
-install -m755 "$publish_dir/LyricifyIsland" "$app/Contents/MacOS/LyricifyIsland"
+install -m755 "$publish_dir/Kashishu" "$app/Contents/MacOS/LyricifyIsland"
 [[ -x "$publish_dir/LyricifyIslandGlass" ]] || {
   echo 'Native Liquid Glass island helper was not built' >&2
   exit 1

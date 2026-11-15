@@ -4,13 +4,14 @@ using System.Text;
 using System.Text.RegularExpressions;
 using SkiaSharp;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 // Layout is cached per song/width. Drawing never measures or rebuilds glyph paths per frame.
 internal sealed class LyricsTextLayout : IDisposable
 {
     internal sealed record Glyph(SKPath Path, float X, float Baseline, float Width, int TextOffset)
     {
+        public float LineX { get; init; }
         public double StartMs { get; set; }
         public double EndMs { get; set; }
         public double SyllableDurationMs { get; set; }
@@ -31,6 +32,7 @@ internal sealed class LyricsTextLayout : IDisposable
         FontSize = size;
         maxWidth = Math.Max(size, maxWidth);
         var x = 0f;
+        var lineX = 0f;
         var row = 0;
         var textOffset = 0;
         var nextWordGroup = 0;
@@ -104,8 +106,12 @@ internal sealed class LyricsTextLayout : IDisposable
                 if (!whitespace)
                     Glyphs.Add(new Glyph(part.Font.GetTextPath(part.Text, SKPoint.Empty),
                         x, size + row * size * 1.28f, part.Width, part.Offset)
-                    { WordGroup = partGroups[partIndex] });
+                    {
+                        LineX = lineX,
+                        WordGroup = partGroups[partIndex]
+                    });
                 x += part.Width;
+                lineX += part.Width;
                 Width = Math.Max(Width, Math.Min(maxWidth, x));
             }
         }
@@ -123,7 +129,11 @@ internal sealed class LyricsTextLayout : IDisposable
             }
             var end = Glyphs.Count > 0 && Glyphs[^1].Baseline == baseline
                 ? Glyphs[^1].X + Glyphs[^1].Width : 0;
-            Glyphs.Add(new Glyph(font.GetTextPath("…", SKPoint.Empty), end, baseline, ellipsisWidth, text.Length));
+            var ellipsisLineX = Glyphs.Count > 0 ? Glyphs[^1].LineX + Glyphs[^1].Width : 0;
+            Glyphs.Add(new Glyph(font.GetTextPath("…", SKPoint.Empty), end, baseline, ellipsisWidth, text.Length)
+            {
+                LineX = ellipsisLineX
+            });
         }
         var inkBounds = SKRect.Empty;
         foreach (var glyph in Glyphs)

@@ -9,7 +9,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 internal sealed class BannerPage : PanelPage
 {

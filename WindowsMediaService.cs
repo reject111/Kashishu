@@ -7,7 +7,7 @@ using Windows.Media;
 using Windows.Media.Control;
 using Windows.Storage.Streams;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>
 /// Local playback source on Windows. MPRIS has no equivalent here, so the system media

@@ -22,7 +22,7 @@ app = Path(sys.argv[1]).resolve()
 output = Path(sys.argv[2]).resolve()
 executable = app / "Contents/MacOS/LyricifyIsland"
 assert executable.is_file(), "Build LyricifyIsland.app first"
-config = output / "config/lyricify-island"
+config = output / "config/kashishu"
 config.mkdir(parents=True, exist_ok=True)
 def reset_settings():
     (config / "settings.json").write_text(json.dumps({"AcrylicIsland": True, "EnableTrackOffsets": True}))
