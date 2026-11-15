@@ -2,7 +2,7 @@
 %global __provides_exclude_from ^%{_libdir}/%{name}/.*\.so$
 
 Name:           kashishu
-Version:        0.1.13
+Version:        0.1.14
 Release:        1.0%{?dist}
 Summary:        Desktop lyrics island for Spotify and MPRIS
 License:        Apache-2.0 AND GPL-3.0-or-later AND MIT AND BSD-3-Clause
@@ -47,6 +47,8 @@ install -Dm644 vendor/Lyricify-Lyrics-Helper/Lyricify.Lyrics.Helper/Resources/ic
 install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/Kashishu-Apache-2.0.txt
 install -Dm644 vendor/Lyricify-Lyrics-Helper/LICENSE %{buildroot}%{_licensedir}/%{name}/Lyricify-Lyrics-Helper-Apache-2.0.txt
 install -Dm644 licenses/NWayland-MIT.txt %{buildroot}%{_licensedir}/%{name}/NWayland-MIT.txt
+install -Dm644 licenses/OpenAI-MIT.txt %{buildroot}%{_licensedir}/%{name}/OpenAI-MIT.txt
+install -Dm644 licenses/Microsoft-MIT.txt %{buildroot}%{_licensedir}/%{name}/Microsoft-MIT.txt
 install -Dm644 licenses/OppoPodsManager-GPL-3.0.txt %{buildroot}%{_licensedir}/%{name}/OppoPodsManager-GPL-3.0.txt
 python3 packaging/write-nuget-licenses.py .nuget-packages "%{buildroot}%{_licensedir}/%{name}/nuget" licenses/NWayland-MIT.txt
 install -Dm644 THIRD_PARTY_NOTICES.md %{buildroot}%{_docdir}/%{name}/THIRD_PARTY_NOTICES.md

@@ -74,11 +74,14 @@ internal static class TrackCache
         }
     }
 
-    public static long Size()
+    public static long Size() => Size(CacheDirectory());
+
+    public static long TranslationSize() => Size(TranslationDirectory());
+
+    private static long Size(string directory)
     {
         try
         {
-            var directory = CacheDirectory();
             return Directory.Exists(directory)
                 ? Directory.EnumerateFiles(directory).Sum(path => new FileInfo(path).Length)
                 : 0;
@@ -90,13 +93,19 @@ internal static class TrackCache
         }
     }
 
-    public static bool Clear()
+    public static bool Clear() => ClearFiles(CacheDirectory());
+
+    public static bool ClearTranslations() => ClearFiles(TranslationDirectory());
+
+    private static bool ClearFiles(string directory)
     {
         try
         {
-            var directory = CacheDirectory();
             if (Directory.Exists(directory))
-                Directory.Delete(directory, recursive: true);
+            {
+                foreach (var path in Directory.EnumerateFiles(directory))
+                    File.Delete(path);
+            }
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -117,6 +126,8 @@ internal static class TrackCache
     private static string PathFor(string id) => Path.Combine(
         CacheDirectory(),
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id))) + ".json");
+
+    internal static string TranslationDirectory() => Path.Combine(CacheDirectory(), "translations");
 
     private static string CacheDirectory()
     {

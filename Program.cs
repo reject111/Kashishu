@@ -116,6 +116,7 @@ public sealed class App : Application
     private WaylandAccessibility? _accessibility;
     private WindowIcon? _appIcon;
     private PlaybackStore? _store;
+    private AiLyricsTranslation? _aiLyricsTranslation;
     private IPlaybackSource? _playbackSource;
     private CancellationTokenSource? _playbackCancellation;
     private Task? _playbackTask;
@@ -138,6 +139,7 @@ public sealed class App : Application
         {
             _store = new PlaybackStore();
             _settings = SettingsStore.Load();
+            _aiLyricsTranslation = new AiLyricsTranslation(_store, _settings);
             if (_settings.StartOnLogin)
                 Autostart.SetEnabled(true);
             _overlay = new OverlayWindow(
@@ -173,6 +175,7 @@ public sealed class App : Application
             desktop.Exit += (_, _) =>
             {
                 _shutdown.Cancel();
+                _aiLyricsTranslation.Dispose();
                 _headphones.Dispose();
                 _accessibility?.Stop();
             };
@@ -356,7 +359,7 @@ public sealed class App : Application
         else
         {
             _lyricsWindow = new LyricsWindow(_store!, _settings, _appIcon, ControlPlaybackAsync,
-                () => new SettingsPage(_settings, ApplySettings, () => _settings, RefreshCurrentTrack),
+                () => new SettingsPage(_settings, ApplySettings, () => _settings, RefreshCurrentTrack, _aiLyricsTranslation!),
                 () => new BannerPage(_store!, () => _settings),
                 value => ApplySettings(_settings with { ShowTranslation = value }, false),
                 value => ApplySettings(_settings with { ShowIsland = value }, false), _headphones!);
@@ -417,6 +420,7 @@ public sealed class App : Application
         }
 
         _settings = settings;
+        _aiLyricsTranslation?.ApplySettings(settings);
         _updateTrayPlayback?.Invoke();
         if (_islandMenuItem is not null)
             _islandMenuItem.IsChecked = settings.ShowIsland;

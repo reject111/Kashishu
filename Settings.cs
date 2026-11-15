@@ -82,7 +82,12 @@ internal readonly record struct IslandSettings(
     bool WindowLyricsLift = true,
     LyricsLiftMode IslandLyricsLiftMode = LyricsLiftMode.Stay,
     LyricsLiftMode WindowLyricsLiftMode = LyricsLiftMode.Stay,
-    int IslandGlowIntensity = SettingsStore.DefaultIslandGlowIntensity)
+    int IslandGlowIntensity = SettingsStore.DefaultIslandGlowIntensity,
+    bool AiTranslationEnabled = false,
+    string AiTranslationApiKey = "",
+    string AiTranslationBaseUrl = SettingsStore.DefaultAiTranslationBaseUrl,
+    string AiTranslationModel = SettingsStore.DefaultAiTranslationModel,
+    string AiTranslationLanguage = SettingsStore.DefaultAiTranslationLanguage)
 {
     public bool HasSpotifyCredentials =>
         !string.IsNullOrWhiteSpace(SpotifyClientId)
@@ -132,6 +137,9 @@ internal readonly record struct IslandSettings(
 
 internal static class SettingsStore
 {
+    public const string DefaultAiTranslationBaseUrl = "https://api.openai.com/v1";
+    public const string DefaultAiTranslationModel = "gpt-4o-mini";
+    public const string DefaultAiTranslationLanguage = "简体中文";
     public const double DefaultWidthPercent = 70d;
     public const double MinimumWidthPercent = 40d;
     public const double MaximumWidthPercent = 100d;
@@ -202,7 +210,12 @@ internal static class SettingsStore
                 data?.WindowLyricsLift ?? true,
                 data?.IslandLyricsLiftMode ?? LyricsLiftMode.Stay,
                 data?.WindowLyricsLiftMode ?? LyricsLiftMode.Stay,
-                data?.IslandGlowIntensity ?? DefaultIslandGlowIntensity));
+                data?.IslandGlowIntensity ?? DefaultIslandGlowIntensity,
+                data?.AiTranslationEnabled ?? false,
+                data?.AiTranslationApiKey ?? string.Empty,
+                data?.AiTranslationBaseUrl ?? DefaultAiTranslationBaseUrl,
+                data?.AiTranslationModel ?? DefaultAiTranslationModel,
+                data?.AiTranslationLanguage ?? DefaultAiTranslationLanguage));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -260,7 +273,12 @@ internal static class SettingsStore
                     WindowLyricsLift = settings.WindowLyricsLift,
                     IslandLyricsLiftMode = settings.IslandLyricsLiftMode,
                     WindowLyricsLiftMode = settings.WindowLyricsLiftMode,
-                    IslandGlowIntensity = settings.IslandGlowIntensity
+                    IslandGlowIntensity = settings.IslandGlowIntensity,
+                    AiTranslationEnabled = settings.AiTranslationEnabled,
+                    AiTranslationApiKey = settings.AiTranslationApiKey,
+                    AiTranslationBaseUrl = settings.AiTranslationBaseUrl,
+                    AiTranslationModel = settings.AiTranslationModel,
+                    AiTranslationLanguage = settings.AiTranslationLanguage
                 }));
             Secure(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             File.Move(temporary, path, overwrite: true);
@@ -315,6 +333,13 @@ internal static class SettingsStore
             ScalePercent = NormalizeScalePercent(settings.ScalePercent),
             SpotifyClientId = settings.SpotifyClientId?.Trim() ?? string.Empty,
             SpotifyClientSecret = settings.SpotifyClientSecret?.Trim() ?? string.Empty,
+            AiTranslationApiKey = settings.AiTranslationApiKey?.Trim() ?? string.Empty,
+            AiTranslationBaseUrl = string.IsNullOrWhiteSpace(settings.AiTranslationBaseUrl)
+                ? DefaultAiTranslationBaseUrl : settings.AiTranslationBaseUrl.Trim().TrimEnd('/'),
+            AiTranslationModel = string.IsNullOrWhiteSpace(settings.AiTranslationModel)
+                ? DefaultAiTranslationModel : settings.AiTranslationModel.Trim(),
+            AiTranslationLanguage = string.IsNullOrWhiteSpace(settings.AiTranslationLanguage)
+                ? DefaultAiTranslationLanguage : settings.AiTranslationLanguage.Trim(),
             TopOffset = NormalizeTopOffset(settings.TopOffset),
             LyricsOffsetMs = NormalizeLyricsOffsetMs(settings.LyricsOffsetMs),
             BackgroundOpacityPercent = NormalizeBackgroundOpacityPercent(settings.BackgroundOpacityPercent),
@@ -439,6 +464,11 @@ internal static class SettingsStore
         public LyricsLiftMode? IslandLyricsLiftMode { get; init; }
         public LyricsLiftMode? WindowLyricsLiftMode { get; init; }
         public int? IslandGlowIntensity { get; init; }
+        public bool? AiTranslationEnabled { get; init; }
+        public string? AiTranslationApiKey { get; init; }
+        public string? AiTranslationBaseUrl { get; init; }
+        public string? AiTranslationModel { get; init; }
+        public string? AiTranslationLanguage { get; init; }
     }
 }
 

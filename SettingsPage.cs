@@ -2,6 +2,7 @@ using Avalonia;
 using System.Diagnostics;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -14,6 +15,7 @@ internal sealed class SettingsPage : PanelPage
     private const string ScaleIcon = "M7 14H5V19H10V17H7V14M5 10H7V7H10V5H5V10M17 17H14V19H19V14H17V17M14 5V7H17V10H19V5H14Z";
     private const string MusicIcon = "M12 3V13.55A4 4 0 1 0 14 17V7H20V3H12Z";
     private const string LyricsIcon = "M4 6H20V8H4V6M4 11H20V13H4V11M4 16H14V18H4V16Z";
+    private const string TranslationIcon = "M6 3H8V5H13V7H11.5C11 9.2 10 11 8.6 12.5L10.8 14.4L9.5 15.9L7.2 13.9C5.8 15.1 4.2 16 2.5 16.7L1.7 14.9C3.2 14.3 4.6 13.5 5.8 12.5C4.8 11.4 4 10 3.5 8.5H5.6C6 9.5 6.5 10.3 7.2 11.1C8.2 10 9 8.6 9.4 7H2V5H6V3ZM16 10H18L23 22H20.8L19.6 19H14.4L13.2 22H11L16 10ZM15.2 17H18.8L17 12.6L15.2 17Z";
     private const string PositionIcon = "M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22S19 14.25 19 9C19 5.13 15.87 2 12 2M12 11.5A2.5 2.5 0 1 1 12 6.5A2.5 2.5 0 0 1 12 11.5Z";
     private const string BehaviorIcon = "M12 2A10 10 0 1 0 22 12A10 10 0 0 0 12 2M13 7V11.59L16.2 14.79L14.79 16.2L11 12.41V7H13Z";
     private const string RenderIcon = "M13 2L3 14H12L11 22L21 10H12L13 2Z";
@@ -35,7 +37,8 @@ internal sealed class SettingsPage : PanelPage
         IslandSettings initialSettings,
         Func<IslandSettings, bool, bool> settingsChanged,
         Func<IslandSettings> currentSettings,
-        Func<bool> refreshCurrentTrack)
+        Func<bool> refreshCurrentTrack,
+        AiLyricsTranslation aiTranslation)
     {
         var settings = SettingsStore.Normalize(initialSettings);
 
@@ -403,9 +406,6 @@ internal sealed class SettingsPage : PanelPage
         var lyricsSection = Ui.Section(
             "歌词",
             "控制歌词内容和时间同步",
-            Ui.Row("显示翻译", "有翻译时在原文下方显示",
-                Switch("显示歌词翻译", settings.ShowTranslation,
-                    value => Commit(settings with { ShowTranslation = value }))),
             Ui.Row("灵动岛歌词上下运动", "可选择升起后保持在顶部连成平台，或完整升起后平滑回落",
                 islandLiftControls),
             Ui.Row("主界面歌词上下运动", "可选择升起后保持在顶部连成平台，或完整升起后平滑回落",
@@ -442,6 +442,102 @@ internal sealed class SettingsPage : PanelPage
             Ui.Row("每首歌曲偏移", "开启后可在灵动岛右键菜单中调整当前歌曲", enableTrackOffsets),
             trackOffsetManager,
             Ui.Row("重新获取当前歌曲", "忽略本次缓存结果，重新请求歌词和歌曲信息", refreshAction));
+
+        // ── 翻译 ────────────────────────────────────────────────────────────────
+        const double translationFieldWidth = 260;
+
+        static string InputValue(string? text, string fallback = "") =>
+            string.IsNullOrWhiteSpace(text) ? fallback : text.Trim();
+
+        void SaveTranslationValue(Control field, Func<IslandSettings, IslandSettings> update)
+        {
+            var latest = currentSettings();
+            var updated = update(latest);
+            var saved = updated == latest || Commit(updated);
+            DataValidationErrors.SetErrors(field, saved ? null : ["保存失败，请查看终端错误"]);
+        }
+
+        static void SaveOnEditCompleted(Control field, Action save)
+        {
+            field.PropertyChanged += (_, args) =>
+            {
+                if (args.Property == IsKeyboardFocusWithinProperty && !field.IsKeyboardFocusWithin)
+                    save();
+            };
+            field.AddHandler(KeyDownEvent, (_, args) =>
+            {
+                if (args.Key == Key.Enter)
+                    save();
+            }, handledEventsToo: true);
+        }
+
+        var targetLanguages = new[]
+        {
+            "简体中文", "繁體中文", "English", "日本語", "한국어",
+            "Español", "Français", "Deutsch", "Português", "Русский"
+        };
+        var translationLanguage = Ui.Combo("AI 翻译目标语言");
+        translationLanguage.Width = translationFieldWidth;
+        translationLanguage.IsEditable = true;
+        translationLanguage.ItemsSource = targetLanguages.Contains(settings.AiTranslationLanguage)
+            ? targetLanguages : [.. targetLanguages, settings.AiTranslationLanguage];
+        translationLanguage.SelectedItem = settings.AiTranslationLanguage;
+        translationLanguage.Text = settings.AiTranslationLanguage;
+        void SaveLanguage(string? language) => SaveTranslationValue(translationLanguage, latest => latest with
+        {
+            AiTranslationLanguage = InputValue(language, SettingsStore.DefaultAiTranslationLanguage)
+        });
+        translationLanguage.SelectionChanged += (_, _) =>
+        {
+            if (translationLanguage.SelectedItem is string language)
+                SaveLanguage(language);
+        };
+        SaveOnEditCompleted(translationLanguage, () => SaveLanguage(translationLanguage.Text));
+
+        var aiApiKey = Ui.Input("AI 翻译 API Key", "输入 API Key", settings.AiTranslationApiKey, password: true);
+        var aiBaseUrl = Ui.Input("AI 翻译 Base URL", SettingsStore.DefaultAiTranslationBaseUrl,
+            settings.AiTranslationBaseUrl);
+        var aiModel = Ui.Input("AI 翻译模型", SettingsStore.DefaultAiTranslationModel, settings.AiTranslationModel);
+        aiApiKey.Width = translationFieldWidth;
+        aiBaseUrl.Width = translationFieldWidth;
+        aiModel.Width = translationFieldWidth;
+
+        SaveOnEditCompleted(aiApiKey, () => SaveTranslationValue(aiApiKey, latest => latest with
+        {
+            AiTranslationApiKey = InputValue(aiApiKey.Text)
+        }));
+        SaveOnEditCompleted(aiBaseUrl, () =>
+        {
+            var baseUrl = InputValue(aiBaseUrl.Text, SettingsStore.DefaultAiTranslationBaseUrl);
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
+                || uri.Scheme is not ("http" or "https")
+                || !string.IsNullOrEmpty(uri.UserInfo)
+                || !string.IsNullOrEmpty(uri.Query)
+                || !string.IsNullOrEmpty(uri.Fragment))
+            {
+                DataValidationErrors.SetErrors(aiBaseUrl, ["请输入有效的 HTTP 或 HTTPS 地址"]);
+                return;
+            }
+            SaveTranslationValue(aiBaseUrl, latest => latest with { AiTranslationBaseUrl = baseUrl.TrimEnd('/') });
+        });
+        SaveOnEditCompleted(aiModel, () => SaveTranslationValue(aiModel, latest => latest with
+        {
+            AiTranslationModel = InputValue(aiModel.Text, SettingsStore.DefaultAiTranslationModel)
+        }));
+
+        var translationSection = Ui.Section(
+            "翻译",
+            "控制歌词译文的显示和生成，输入完成后自动保存",
+            Ui.Row("显示翻译", "在歌词原文下方显示译文",
+                Switch("显示歌词翻译", settings.ShowTranslation,
+                    value => Commit(settings with { ShowTranslation = value }))),
+            Ui.Row("AI 歌词翻译", "没有现成译文时自动翻译当前歌曲",
+                Switch("启用 AI 歌词翻译", settings.AiTranslationEnabled,
+                    value => Commit(settings with { AiTranslationEnabled = value }))),
+            Ui.Row("目标语言", "可选择或输入语言", translationLanguage),
+            Ui.Row("API Key", "密钥保存在本机", aiApiKey),
+            Ui.Row("Base URL", "歌词会发送到此地址", aiBaseUrl),
+            Ui.Row("模型", "填写服务支持的模型名称", aiModel));
 
         // ── 外观 ────────────────────────────────────────────────────────────────
         var appearanceSection = Ui.Section(
@@ -621,26 +717,30 @@ internal sealed class SettingsPage : PanelPage
                     value => Commit(settings with { VerticalSync = value }))));
 
         // ── 缓存 ────────────────────────────────────────────────────────────────
-        var cacheStatus = Ui.Text(string.Empty, 12, muted: true);
-        cacheStatus.VerticalAlignment = VerticalAlignment.Center;
         var clearCache = Ui.Button(string.Empty);
-        void RefreshCacheSize() => clearCache.Content = $"清理缓存（{TrackCache.FormatSize(TrackCache.Size())}）";
-        RefreshCacheSize();
-        clearCache.Click += (_, _) =>
+        var clearTranslationCache = Ui.Button(string.Empty);
+        void RefreshCacheSizes()
         {
-            cacheStatus.Text = TrackCache.Clear() ? "缓存已清理" : "清理失败，请查看终端错误";
-            RefreshCacheSize();
-        };
+            clearCache.Content = $"清理缓存（{TrackCache.FormatSize(TrackCache.Size())}）";
+            clearTranslationCache.Content = $"清理翻译缓存（{TrackCache.FormatSize(TrackCache.TranslationSize())}）";
+        }
+
+        Control CacheRow(string title, string description, Button button, Func<bool> clear)
+        {
+            var message = Ui.Text(description, 12, muted: true);
+            button.Click += (_, _) =>
+            {
+                message.Text = clear() ? description : "清理失败，请查看终端错误";
+                RefreshCacheSizes();
+            };
+            return Ui.Row(Ui.Text(title, 14, FontWeight.SemiBold), message, button);
+        }
+
         var cacheSection = Ui.Section(
             "缓存",
-            "缓存歌词、封面和歌曲信息",
-            Ui.Row("本地缓存", "清理后会在下次播放时重新获取",
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 12,
-                    Children = { cacheStatus, clearCache }
-                }));
+            "查看占用空间和清理缓存",
+            CacheRow("本地缓存", "缓存原始歌词、封面和歌曲信息", clearCache, TrackCache.Clear),
+            CacheRow("翻译缓存", "缓存 AI 生成的歌词译文", clearTranslationCache, aiTranslation.ClearCache));
 
         _onShown = () =>
         {
@@ -651,6 +751,7 @@ internal sealed class SettingsPage : PanelPage
                 TrackOffsetTitles = latest.TrackOffsetTitles
             };
             RefreshTrackOffsetManager();
+            RefreshCacheSizes();
         };
 
         // ── 布局：左侧导航 + 右侧内容 ───────────────────────────────────────────
@@ -658,6 +759,7 @@ internal sealed class SettingsPage : PanelPage
         {
             (MusicIcon, "播放信息源", playbackSection),
             (LyricsIcon, "歌词", lyricsSection),
+            (TranslationIcon, "翻译", translationSection),
             (ScaleIcon, "外观", appearanceSection),
             (PositionIcon, "交互", positionSection),
             (BehaviorIcon, "行为", behaviorSection),
@@ -758,6 +860,7 @@ internal sealed class SettingsPage : PanelPage
             navList.Children.Add(nav);
         }
 
+        var activeSection = -1;
         void UpdateActiveSection()
         {
             var active = 0;
@@ -774,6 +877,12 @@ internal sealed class SettingsPage : PanelPage
                         active = i;
                 }
             }
+
+            if (active == activeSection)
+                return;
+            activeSection = active;
+            if (ReferenceEquals(sections[active].Section, cacheSection))
+                RefreshCacheSizes();
 
             for (var i = 0; i < navButtons.Count; i++)
             {

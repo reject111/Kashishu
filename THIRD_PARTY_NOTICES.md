@@ -5,6 +5,12 @@
 The Wayland backend uses [NWayland](https://github.com/AvaloniaUI/NWayland),
 version 0.11.0. Its MIT license is included in `licenses/NWayland-MIT.txt`.
 
+## OpenAI .NET SDK
+
+AI lyrics translation uses [OpenAI .NET](https://github.com/openai/openai-dotnet),
+version 2.15.0, and its Microsoft .NET dependencies. Their MIT licenses are in
+`licenses/OpenAI-MIT.txt` and `licenses/Microsoft-MIT.txt`.
+
 ## OppoPodsManager device metadata
 
 `Resources/Headphones/DeviceModels.json` and `Resources/Headphones/EqModeNames.json`

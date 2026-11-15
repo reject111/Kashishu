@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-version="${1:-0.1.13}"
+version="${1:-0.1.14}"
 topdir="$(mktemp -d)"
 trap 'rm -rf -- "$topdir"' EXIT
 
@@ -43,6 +43,8 @@ install -Dm644 %{_sourcedir}/Kashishu-Apache-2.0.txt %{buildroot}%{_licensedir}/
 install -Dm644 %{_sourcedir}/Lyricify-Lyrics-Helper-Apache-2.0.txt %{buildroot}%{_licensedir}/%{name}/Lyricify-Lyrics-Helper-Apache-2.0.txt
 install -Dm644 %{_sourcedir}/OppoPodsManager-GPL-3.0.txt %{buildroot}%{_licensedir}/%{name}/OppoPodsManager-GPL-3.0.txt
 install -Dm644 %{_sourcedir}/NWayland-MIT.txt %{buildroot}%{_licensedir}/%{name}/NWayland-MIT.txt
+install -Dm644 %{_sourcedir}/OpenAI-MIT.txt %{buildroot}%{_licensedir}/%{name}/OpenAI-MIT.txt
+install -Dm644 %{_sourcedir}/Microsoft-MIT.txt %{buildroot}%{_licensedir}/%{name}/Microsoft-MIT.txt
 
 %files
 %doc %{_docdir}/%{name}/THIRD_PARTY_NOTICES.md

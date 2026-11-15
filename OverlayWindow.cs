@@ -1352,6 +1352,8 @@ internal sealed class IslandRenderer : IDisposable
     private const float SingleLinePillHeight = 68f;
     private const float MainSize = 32f;
     private const float TranslationSize = 21f;
+    private const float AiBadgeGap = 6f;
+    private const float AiBadgeHeight = 15f;
     private const float CollapsedWidth = 450f;
     private const float DoubleLineOriginOffset = 2f;
 
@@ -1365,6 +1367,7 @@ internal sealed class IslandRenderer : IDisposable
     private readonly SKFont _cjkFont;
     private readonly SKFont _japaneseFont;
     private readonly SKFont _translationFont;
+    private readonly SKFont _aiBadgeFont;
     private readonly SKPaint _shadow = Paint(new SKColor(0, 0, 0, 115), 7f);
     private readonly SKPaint _fill = Paint(new SKColor(3, 5, 7, 170));
     private readonly SKPaint _rim = new()
@@ -1382,6 +1385,8 @@ internal sealed class IslandRenderer : IDisposable
     private SKImage? _switchImage;
     private readonly SKPaint _placeholderPaint = Paint(new SKColor(38, 42, 46));
     private readonly SKPaint _translationPaint = Paint(new SKColor(160, 161, 166, 220));
+    private readonly SKPaint _aiBadgeBackground = Paint(new SKColor(255, 255, 255, 32));
+    private readonly SKPaint _aiBadgeText = Paint(new SKColor(220, 221, 224, 220));
     private readonly SKPaint _idlePaint = Paint(new SKColor(108, 109, 114, 225));
     private readonly SKPaint _wideGlow = Paint(new SKColor(255, 255, 255, 42), 1.65f);
     private readonly SKPaint _tightGlow = Paint(new SKColor(255, 255, 255, 70), 0.85f);
@@ -1410,6 +1415,7 @@ internal sealed class IslandRenderer : IDisposable
         _cjkFont = CreateFont(_cjk, MainSize);
         _japaneseFont = CreateFont(_japanese, MainSize);
         _translationFont = CreateFont(_cjk, TranslationSize);
+        _aiBadgeFont = CreateFont(_latin, 11f);
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Kashishu.icon.png");
         if (stream is not null)
             _icon = SKBitmap.Decode(stream);
@@ -2119,7 +2125,20 @@ internal sealed class IslandRenderer : IDisposable
         if (hasTranslation)
         {
             _translationPaint.Color = new SKColor(160, 161, 166, (byte)(220 * opacity));
-            canvas.DrawText(translation, centerX - translationWidth / 2f, originY + 24f, translationFont, _translationPaint);
+            var x = centerX - translationWidth / 2f;
+            var baseline = originY + 24f;
+            canvas.DrawText(translation, x, baseline, translationFont, _translationPaint);
+            if (line.IsAiTranslation)
+            {
+                var badgeLeft = x + layout.TranslationTextWidth + AiBadgeGap;
+                var badgeWidth = _aiBadgeFont.MeasureText("AI") + 10f;
+                var badge = new SKRect(badgeLeft, baseline - AiBadgeHeight + 2f,
+                    badgeLeft + badgeWidth, baseline + 2f);
+                _aiBadgeBackground.Color = new SKColor(255, 255, 255, (byte)(32 * opacity));
+                _aiBadgeText.Color = new SKColor(220, 221, 224, (byte)(220 * opacity));
+                canvas.DrawRoundRect(badge, 4f, 4f, _aiBadgeBackground);
+                canvas.DrawText("AI", badgeLeft + 5f, baseline - 1f, _aiBadgeFont, _aiBadgeText);
+            }
         }
         canvas.Restore();
     }
@@ -2565,15 +2584,19 @@ internal sealed class IslandRenderer : IDisposable
         _karaokeLayout2 = _karaokeLayout1;
         _layoutLine1 = line;
         var (runs, width) = LayoutMainText(line.Text, fonts);
-        var translationWidth = string.IsNullOrWhiteSpace(line.Translation)
+        var translationTextWidth = string.IsNullOrWhiteSpace(line.Translation)
             ? 0f
             : _translationFont.MeasureText(line.Translation);
+        var translationWidth = translationTextWidth > 0f && line.IsAiTranslation
+            ? translationTextWidth + AiBadgeGap + _aiBadgeFont.MeasureText("AI") + 10f
+            : translationTextWidth;
         var glyphs = BuildGlyphs(runs, line, width, englishWordEffects);
         return _karaokeLayout1 = new KaraokeLayout(
             runs,
             glyphs,
             BuildSyllables(line, glyphs, fonts, englishWordEffects),
             width,
+            translationTextWidth,
             translationWidth);
     }
 
@@ -2986,6 +3009,7 @@ internal sealed class IslandRenderer : IDisposable
         _cjkFont.Dispose();
         _japaneseFont.Dispose();
         _translationFont.Dispose();
+        _aiBadgeFont.Dispose();
         _shadow.Dispose();
         _fill.Dispose();
         _rim.Dispose();
@@ -2996,6 +3020,8 @@ internal sealed class IslandRenderer : IDisposable
         _switchImage?.Dispose();
         _placeholderPaint.Dispose();
         _translationPaint.Dispose();
+        _aiBadgeBackground.Dispose();
+        _aiBadgeText.Dispose();
         _idlePaint.Dispose();
         _wideGlow.Dispose();
         _tightGlow.Dispose();
@@ -3015,6 +3041,7 @@ internal sealed class IslandRenderer : IDisposable
         List<KaraokeGlyph> Glyphs,
         KaraokeSyllable[] Syllables,
         float Width,
+        float TranslationTextWidth,
         float TranslationWidth) : IDisposable
     {
         public void Dispose()
