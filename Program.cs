@@ -50,7 +50,7 @@ internal static class Program
             { Controls = new PlaybackControls(true, false, false, true) };
             renderer.Draw(surface.Canvas, 1120, 720,
                 new LyricsWindowFrame(snapshot, 9_650, 9_650, 10, true, false, false, false,
-                    false, null, null, null, new Point(-1, -1), false));
+                    false, null, null, new Point(-1, -1), false));
             using var image = surface.Snapshot();
             using var data = image.Encode(SKEncodedImageFormat.Png, 100);
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(lyricsPath))!);
@@ -359,7 +359,7 @@ public sealed class App : Application
         else
         {
             _lyricsWindow = new LyricsWindow(_store!, _settings, _appIcon, ControlPlaybackAsync,
-                () => new SettingsPage(_settings, ApplySettings, () => _settings, RefreshCurrentTrack, _aiLyricsTranslation!),
+                showToast => new SettingsPage(_settings, ApplySettings, () => _settings, RefreshCurrentTrack, _aiLyricsTranslation!, showToast),
                 () => new BannerPage(_store!, () => _settings),
                 value => ApplySettings(_settings with { ShowTranslation = value }, false),
                 value => ApplySettings(_settings with { ShowIsland = value }, false), _headphones!);
@@ -1047,7 +1047,7 @@ internal static class SelfCheck
                     }
                     windowRenderer.Draw(windowSurface.Canvas, 960, 640,
                         new LyricsWindowFrame(snapshot, pos, pos, offsetMs / 1_000d, true, false, false, false, false,
-                            null, null, null, new Point(-1, -1), false)
+                            null, null, new Point(-1, -1), false)
                         {
                             EnglishWordEffects = true,
                             LyricsLift = liftEnabled,

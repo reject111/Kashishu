@@ -23,7 +23,7 @@ internal sealed record LyricsHeadphoneStatus(string Name, string BatterySummary,
 internal sealed record LyricsWindowFrame(
     PlaybackSnapshot Snapshot, double PositionMs, double LyricsPositionMs, double Seconds,
     bool ShowTranslation, bool LyricsOnly, bool Pinned, bool FullScreen, bool Maximized,
-    double? BrowseScroll, double? SeekPreview, string? Toast, Point Pointer, bool Busy)
+    double? BrowseScroll, double? SeekPreview, Point Pointer, bool Busy)
 {
     public double? VolumePreview { get; init; }
     public bool ShowIsland { get; init; } = true;
@@ -251,15 +251,6 @@ internal sealed class LyricsWindowRenderer : IDisposable
                 DrawFavorite(canvas, layout, frame);
                 if (panel > 0)
                     canvas.Restore();
-            }
-            if (frame.Toast is { Length: > 0 } toast)
-            {
-                var toastWidth = Math.Min(width - 80, 660);
-                var toastRect = new SKRect((width - toastWidth) / 2, height - 68, (width + toastWidth) / 2, height - 24);
-                using var paint = Paint(new SKColor(10, 14, 20, 240));
-                canvas.DrawRoundRect(toastRect, 14, 14, paint);
-                Label(canvas, toast, toastRect.Left + 16, toastRect.Top + 11, 13,
-                    White(235), toastWidth - 32);
             }
             if (!fillWindow)
             {

@@ -128,16 +128,63 @@ internal sealed class AiLyricsTranslation : IDisposable
         _request = null;
     }
 
+    private static ChatClient CreateClient(string model, string apiKey, string baseUrl) =>
+        new(model, new ApiKeyCredential(apiKey), new OpenAIClientOptions
+        {
+            Endpoint = new Uri(baseUrl.TrimEnd('/') + "/")
+        });
+
+    internal static async Task<string?> TestConnectionAsync(IslandSettings settings, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(25));
+        try
+        {
+            var client = CreateClient(settings.AiTranslationModel, settings.AiTranslationApiKey, settings.AiTranslationBaseUrl);
+            ChatCompletion completion = await client.CompleteChatAsync(
+                [new UserChatMessage("Reply with OK.")], null, timeout.Token);
+            return completion.Content.Any(part => !string.IsNullOrWhiteSpace(part.Text))
+                ? null : "测试失败：模型没有返回文本";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return "测试失败：连接超时";
+        }
+        catch (ClientResultException exception)
+        {
+            return exception.Status switch
+            {
+                0 => "测试失败：无法连接服务，请检查网络和接口地址",
+                401 or 403 => "测试失败：API Key 无效或没有权限",
+                404 => "测试失败：接口地址或模型不可用",
+                408 or 504 => "测试失败：连接超时",
+                429 => "测试失败：请求受限或额度不足",
+                >= 500 => $"测试失败：服务暂时不可用（HTTP {exception.Status}）",
+                _ => $"测试失败：请检查接口地址和模型（HTTP {exception.Status}）"
+            };
+        }
+        catch (HttpRequestException)
+        {
+            return "测试失败：无法连接服务，请检查网络和接口地址";
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[ai-translation] connection test failed: {exception.GetType().Name}");
+            return "测试失败：请检查接口地址、模型和网络";
+        }
+    }
+
     private async Task TranslateAsync(string key, string[] lyrics, Options options, CancellationTokenSource request)
     {
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(request.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(90));
-            var client = new ChatClient(options.Model, new ApiKeyCredential(options.ApiKey), new OpenAIClientOptions
-            {
-                Endpoint = new Uri(options.BaseUrl.TrimEnd('/') + "/")
-            });
+            var client = CreateClient(options.Model, options.ApiKey, options.BaseUrl);
             ChatMessage[] messages =
             [
                 new SystemChatMessage("Translate song lyrics into the requested language. " +

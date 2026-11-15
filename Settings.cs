@@ -334,6 +334,7 @@ internal static class SettingsStore
             ScalePercent = NormalizeScalePercent(settings.ScalePercent),
             SpotifyClientId = settings.SpotifyClientId?.Trim() ?? string.Empty,
             SpotifyClientSecret = settings.SpotifyClientSecret?.Trim() ?? string.Empty,
+            AiTranslationEnabled = settings.AiTranslationEnabled && !string.IsNullOrWhiteSpace(settings.AiTranslationApiKey),
             AiTranslationApiKey = settings.AiTranslationApiKey?.Trim() ?? string.Empty,
             AiTranslationBaseUrl = string.IsNullOrWhiteSpace(settings.AiTranslationBaseUrl)
                 ? DefaultAiTranslationBaseUrl : settings.AiTranslationBaseUrl.Trim().TrimEnd('/'),
