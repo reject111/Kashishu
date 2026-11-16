@@ -2,7 +2,7 @@
 %global __provides_exclude_from ^%{_libdir}/%{name}/.*\.so$
 
 Name:           kashishu
-Version:        0.1.16
+Version:        0.1.17
 Release:        1.0%{?dist}
 Summary:        Desktop lyrics island for Spotify and MPRIS
 License:        Apache-2.0 AND GPL-3.0-or-later AND MIT AND BSD-3-Clause
@@ -43,7 +43,8 @@ install -dm755 %{buildroot}%{_libdir}/%{name} %{buildroot}%{_bindir}
 cp -a publish/. %{buildroot}%{_libdir}/%{name}/
 ln -s ../%{_lib}/%{name}/Kashishu %{buildroot}%{_bindir}/Kashishu
 install -Dm644 packaging/kashishu.desktop %{buildroot}%{_datadir}/applications/kashishu.desktop
-install -Dm644 vendor/Lyricify-Lyrics-Helper/Lyricify.Lyrics.Helper/Resources/icon.png %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/kashishu.png
+install -Dm644 Resources/Icons/kashishu.png %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/kashishu.png
+install -Dm644 Resources/Icons/kashishu.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/kashishu.svg
 install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/Kashishu-Apache-2.0.txt
 install -Dm644 vendor/Lyricify-Lyrics-Helper/LICENSE %{buildroot}%{_licensedir}/%{name}/Lyricify-Lyrics-Helper-Apache-2.0.txt
 install -Dm644 licenses/NWayland-MIT.txt %{buildroot}%{_licensedir}/%{name}/NWayland-MIT.txt
@@ -60,3 +61,4 @@ install -Dm644 THIRD_PARTY_NOTICES.md %{buildroot}%{_docdir}/%{name}/THIRD_PARTY
 %{_libdir}/%{name}/
 %{_datadir}/applications/kashishu.desktop
 %{_datadir}/icons/hicolor/128x128/apps/kashishu.png
+%{_datadir}/icons/hicolor/scalable/apps/kashishu.svg

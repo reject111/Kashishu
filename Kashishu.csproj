@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>0.1.16</Version>
+    <Version>0.1.17</Version>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -32,8 +32,9 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources/Headphones/*.json" LogicalName="Kashishu.Headphones.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Resources/Icons/*.svg" LogicalName="Kashishu.Icons.%(Filename)%(Extension)" />
     <EmbeddedResource
-      Include="vendor/Lyricify-Lyrics-Helper/Lyricify.Lyrics.Helper/Resources/icon.png"
+      Include="Resources/Icons/kashishu.png"
       LogicalName="Kashishu.icon.png" />
   </ItemGroup>
 </Project>
