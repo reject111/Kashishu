@@ -20,9 +20,8 @@ internal static class Ui
         TextWrapping = TextWrapping.Wrap
     };
 
-    /// <summary>Title emphasis. Microsoft YaHei UI only ships Regular and Bold, so SemiBold
-    /// snaps to the heavy Bold face on Windows and makes the UI look blackened.</summary>
-    public static FontWeight Emphasis => OperatingSystem.IsWindows() ? FontWeight.Normal : FontWeight.SemiBold;
+    /// <summary>Use the installed bold face on Windows for the same emphasis as Linux's semibold.</summary>
+    public static FontWeight Emphasis => OperatingSystem.IsWindows() ? FontWeight.Bold : FontWeight.SemiBold;
 
     /// <summary>A titled group of rows rendered as one frosted panel.</summary>
     public static StackPanel Section(string title, string description, params Control[] rows) => new()
@@ -133,6 +132,11 @@ internal static class Ui
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center
         };
+        if (OperatingSystem.IsWindows())
+        {
+            combo.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            combo.VerticalContentAlignment = VerticalAlignment.Center;
+        }
         AutomationProperties.SetName(combo, name);
         return combo;
     }
@@ -165,6 +169,11 @@ internal static class Ui
             BorderBrush = LyricsTheme.CardBorder,
             CornerRadius = new CornerRadius(LyricsTheme.ControlRadius)
         };
+        if (OperatingSystem.IsWindows())
+        {
+            box.Padding = new Thickness(14, 0);
+            box.VerticalContentAlignment = VerticalAlignment.Center;
+        }
         if (password)
         {
             box.PasswordChar = '●';

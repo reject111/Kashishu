@@ -16,6 +16,26 @@ internal static class PanelTheme
         RegisterThemeResources(host);
         RegisterButtonStyles(host);
         RegisterComboStyles(host);
+        if (OperatingSystem.IsWindows())
+        {
+            host.UseLayoutRounding = true;
+            // Grayscale avoids coloured fringes on the translucent panel; light hinting
+            // retains the real bold outlines without forcing small CJK stems onto full pixels.
+            TextOptions.SetTextRenderingMode(host, TextRenderingMode.Antialias);
+            TextOptions.SetTextHintingMode(host, TextHintingMode.Light);
+            TextOptions.SetBaselinePixelAlignment(host, BaselinePixelAlignment.Aligned);
+
+            // Fluent binds the editor's outer alignment to the combo, but leaves its text
+            // at the TextBox default (top). Center the presenter and placeholder together.
+            host.Styles.Add(new Style(x => x.OfType<ComboBox>().Template().OfType<TextBox>().Name("PART_EditableTextBox"))
+            {
+                Setters =
+                {
+                    new Setter(TextBox.VerticalContentAlignmentProperty, Avalonia.Layout.VerticalAlignment.Center),
+                    new Setter(TemplatedControl.MinHeightProperty, 0d)
+                }
+            });
+        }
     }
 
     private static Setter ColourFade() => new(Animatable.TransitionsProperty, new Transitions

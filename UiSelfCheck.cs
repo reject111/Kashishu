@@ -3,6 +3,9 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.LogicalTree;
+using Avalonia.Controls.Presenters;
+using Avalonia.Media;
+using Avalonia.VisualTree;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -27,6 +30,22 @@ internal static class UiSelfCheck
         var page = window.GetLogicalDescendants().OfType<SettingsPage>().Single();
         T Named<T>(string name) where T : Control => page.GetLogicalDescendants().OfType<T>()
             .Single(control => AutomationProperties.GetName(control) == name);
+
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var name in new[] { "Spotify Client ID", "Spotify Client Secret", "AI 翻译 API Key",
+                         "AI 翻译 Base URL", "AI 翻译模型" })
+                CheckTextCenter(Named<TextBox>(name));
+            var language = Named<ComboBox>("AI 翻译目标语言");
+            CheckTextCenter(language.GetVisualDescendants().OfType<TextBox>().Single());
+            Require(page.GetLogicalDescendants().OfType<TextBlock>()
+                .Where(text => text.Text is "本地缓存" or "翻译缓存").All(text => text.FontWeight == FontWeight.Bold),
+                "settings preserve Linux's title emphasis using the installed Windows bold face");
+            Require(window.WindowDecorations == WindowDecorations.Full,
+                "native window styles remain available for DWM transitions");
+            Require(window.ExtendClientAreaToDecorationsHint && window.ExtendClientAreaTitleBarHeightHint == 62,
+                "platform caption controls share the immersive header");
+        }
 
         var translation = Named<ToggleSwitch>("显示歌词翻译");
         var original = current();
@@ -96,11 +115,31 @@ internal static class UiSelfCheck
         window.WindowState = WindowState.Maximized;
         await Task.Delay(200);
         window.WindowState = WindowState.Normal;
+        window.WindowState = WindowState.Minimized;
+        await Task.Delay(250);
+        window.RestoreFromMinimized();
+        await Task.Delay(300);
+        Require(window.WindowState == WindowState.Normal, "restore after minimizing");
+        window.WindowState = WindowState.FullScreen;
+        await Task.Delay(350);
+        Require(window.Content is Control { Opacity: 1 }, "fullscreen transition settles");
+        window.WindowState = WindowState.Normal;
+        await Task.Delay(350);
         window.Width = 640;
         window.Height = 540;
         await Task.Delay(300);
         Require(page.Bounds.Width > 0, "compact settings layout");
         window.Close();
+    }
+
+    private static void CheckTextCenter(TextBox input)
+    {
+        var presenter = input.GetVisualDescendants().OfType<TextPresenter>().Single();
+        var origin = presenter.TranslatePoint(default, input)
+            ?? throw new InvalidOperationException("Text presenter is detached");
+        var difference = Math.Abs(origin.Y + presenter.Bounds.Height / 2 - input.Bounds.Height / 2);
+        if (difference > 1)
+            throw new InvalidOperationException($"Text is not vertically centered: {AutomationProperties.GetName(input)} ({difference:0.##} px)");
     }
 
     private static async Task Eventually(Func<bool> condition,

@@ -205,7 +205,7 @@ internal sealed class LyricsWindowRenderer : IDisposable
             _frameDelta = dt;
             _lastSeconds = frame.Seconds;
             _controlsAnimating = false;
-            var fillWindow = OperatingSystem.IsMacOS() || frame.FullScreen || frame.Maximized;
+            var fillWindow = OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() || frame.FullScreen || frame.Maximized;
             var normal = LyricsWindowLayout.Create(width, height, false, fillWindow);
             var lyricsOnly = LyricsWindowLayout.Create(width, height, true, fillWindow);
             var target = frame.LyricsOnly ? 1d : 0;
@@ -466,7 +466,8 @@ internal sealed class LyricsWindowRenderer : IDisposable
     {
         var headerOffset = OperatingSystem.IsMacOS() ? -10 : 0;
         var x = width - 42;
-        if (!OperatingSystem.IsMacOS())
+        if (OperatingSystem.IsWindows()) x -= 214; // Caption controls plus the outer inset.
+        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsWindows())
         {
             HeaderButton(LyricsWindowAction.Close, "close", "关闭", false);
             HeaderButton(LyricsWindowAction.Maximize, frame.Maximized ? "restore" : "maximize", "最大化", false);

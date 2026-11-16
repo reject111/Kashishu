@@ -53,6 +53,19 @@ internal sealed class LyricsWindow : Window
             ? [WindowTransparencyLevel.None] : [WindowTransparencyLevel.Transparent];
         Background = OperatingSystem.IsMacOS() ? new SolidColorBrush(Color.FromRgb(12, 17, 24)) : Brushes.Transparent;
         CanResize = true;
+        if (OperatingSystem.IsWindows())
+        {
+            // Retain native frame styles and DWM animations; platform caption controls
+            // are integrated into the immersive header below.
+            WindowDecorations = WindowDecorations.Full;
+            ExtendClientAreaToDecorationsHint = false;
+            TransparencyLevelHint = [WindowTransparencyLevel.None];
+            Background = new SolidColorBrush(Color.FromRgb(12, 17, 24));
+            Win32Properties.SetWindowCornerPreference(this, Win32Properties.WindowCornerPreference.Round);
+#if WINDOWS
+            WindowsTitleBar.Apply(this);
+#endif
+        }
         _lyrics = new LyricsWindowControl(store, settings, controlPlayback, setTranslation, setIslandVisibility, headphones);
         _lyrics.ToastRequested += ShowToast;
         _toast = new Border
@@ -178,6 +191,12 @@ internal sealed class LyricsWindow : Window
         {
             if (args.Property == WindowStateProperty)
             {
+#if WINDOWS
+                if (_lastWindowState != WindowState &&
+                    (_lastWindowState == WindowState.FullScreen || WindowState == WindowState.FullScreen)
+                    && Content is Control content)
+                    WindowsTitleBar.AnimateFullscreen(content);
+#endif
                 if (WindowState == WindowState.FullScreen && _lastWindowState != WindowState.FullScreen)
                     _beforeFullScreen = _lastWindowState;
                 if (WindowState == WindowState.Minimized && _lastWindowState != WindowState.Minimized)
@@ -243,6 +262,7 @@ internal sealed class LyricsWindow : Window
     }
 
     public void OpenPanel(PanelKind kind) => _panel.Open(kind);
+
 }
 
 internal sealed class LyricsWindowControl : Control, IDisposable
@@ -767,7 +787,7 @@ internal sealed class LyricsWindowDrawOperation : ICustomDrawOperation
 
     public bool HitTest(Point point)
     {
-        if (OperatingSystem.IsMacOS() || _frame.FullScreen || _frame.Maximized) return Bounds.Contains(point);
+        if (OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() || _frame.FullScreen || _frame.Maximized) return Bounds.Contains(point);
         var rect = Bounds.Deflate(10);
         if (!rect.Contains(point)) return false;
         const double radius = 24;

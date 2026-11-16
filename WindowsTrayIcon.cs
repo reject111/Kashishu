@@ -4,9 +4,7 @@ using System.Runtime.InteropServices;
 namespace Kashishu;
 
 /// <summary>
-/// Minimal Shell_NotifyIcon wrapper. Avalonia's tray icon only exposes the native Win32
-/// context menu, which cannot be styled; this keeps control of the click callbacks so the
-/// app can draw its own menu.
+/// Shell_NotifyIcon wrapper with a standard Windows context menu.
 /// </summary>
 internal sealed class WindowsTrayIcon : IDisposable
 {
@@ -96,6 +94,9 @@ internal sealed class WindowsTrayIcon : IDisposable
         };
         _added = Shell_NotifyIconW(NIM_ADD, ref data);
     }
+
+    public void ShowMenu(IReadOnlyList<TrayMenuEntry> entries, nint owner = 0) =>
+        WindowsTrayMenu.Show(owner == 0 ? _window : owner, entries);
 
     private IntPtr WindowProc(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam)
     {

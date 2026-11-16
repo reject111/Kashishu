@@ -2185,15 +2185,15 @@ internal sealed class IslandRenderer : IDisposable
     private void DrawPill(SKCanvas canvas, SKRect rect)
     {
         var radius = rect.Height / 2f;
+        var shadowRect = rect;
+        shadowRect.Offset(0, 3f);
+        canvas.DrawRoundRect(shadowRect, radius, radius, _shadow);
         if (_acrylic && TryDrawAcrylic(canvas, rect, radius))
         {
             canvas.DrawRoundRect(rect, radius, radius, _rim);
             return;
         }
 
-        var shadowRect = rect;
-        shadowRect.Offset(0, 3f);
-        canvas.DrawRoundRect(shadowRect, radius, radius, _shadow);
         canvas.DrawRoundRect(rect, radius, radius, _fill);
         canvas.DrawRoundRect(rect, radius, radius, _rim);
     }

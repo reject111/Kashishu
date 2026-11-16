@@ -1006,7 +1006,7 @@ internal sealed class SettingsPage : PanelPage
                 message.Text = clear() ? description : "清理失败，请查看终端错误";
                 RefreshCacheSizes();
             };
-            return Ui.Row(Ui.Text(title, 14, FontWeight.SemiBold), message, button);
+            return Ui.Row(Ui.Text(title, 14, Ui.Emphasis), message, button);
         }
 
         var cacheSection = Ui.Section(

@@ -130,8 +130,6 @@ public sealed class App : Application
     private TrayIcon? _trayIcon;
 #if WINDOWS
     private WindowsTrayIcon? _windowsTrayIcon;
-    private TrayMenuWindow? _trayMenu;
-    private DateTime _trayMenuClosedAt;
 #endif
     private bool _trayFavoriteBusy;
     private NativeMenuItem? _islandMenuItem;
@@ -429,8 +427,6 @@ public sealed class App : Application
             () => Dispatcher.UIThread.Post(() => ToggleTrayMenu(desktop)));
         desktop.Exit += (_, _) =>
         {
-            _trayMenu?.Close();
-            _trayMenu = null;
             _windowsTrayIcon?.Dispose();
             _windowsTrayIcon = null;
         };
@@ -438,26 +434,7 @@ public sealed class App : Application
 
     private void ToggleTrayMenu(IClassicDesktopStyleApplicationLifetime desktop)
     {
-        if (_trayMenu is not null)
-        {
-            _trayMenu.Close();
-            return;
-        }
-
-        // Clicking the tray icon while the menu is open deactivates and closes it first;
-        // ignore the click that follows so the menu does not pop straight back up.
-        if (DateTime.UtcNow - _trayMenuClosedAt < TimeSpan.FromMilliseconds(220))
-            return;
-
-        var menu = new TrayMenuWindow(BuildTrayMenuEntries(desktop), () => BuildTrayMenuEntries(desktop));
-        _trayMenu = menu;
-        menu.Closed += (_, _) =>
-        {
-            if (ReferenceEquals(_trayMenu, menu))
-                _trayMenu = null;
-            _trayMenuClosedAt = DateTime.UtcNow;
-        };
-        menu.ShowAtCursor();
+        _windowsTrayIcon?.ShowMenu(BuildTrayMenuEntries(desktop));
     }
 #endif
 
@@ -596,6 +573,19 @@ public sealed class App : Application
                 value => ApplySettings(_settings with { ShowIsland = value }, false), _headphones!);
             _accessibility?.Track(_lyricsWindow);
             _lyricsWindow.Closed += (_, _) => _lyricsWindow = null;
+#if WINDOWS
+            _lyricsWindow.KeyDown += (_, args) =>
+            {
+                if (args.Key == Avalonia.Input.Key.Apps
+                    || args.Key == Avalonia.Input.Key.F10 && args.KeyModifiers == Avalonia.Input.KeyModifiers.Shift)
+                {
+                    args.Handled = true;
+                    if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                        _windowsTrayIcon?.ShowMenu(BuildTrayMenuEntries(desktop),
+                            _lyricsWindow.TryGetPlatformHandle()?.Handle ?? 0);
+                }
+            };
+#endif
             _lyricsWindow.Show();
             // The menu-bar app is an accessory (LSUIElement) on macOS; opening a window from
             // the status menu must also bring the app forward or the window stays behind.
@@ -1168,6 +1158,25 @@ internal static class SelfCheck
         using var hitTestRenderer = new IslandRenderer();
         var hitTestFrame = new IslandFrame(track, track.Lyrics[0], null, 1_000, true, "test", 99d, 1d);
         var pillBounds = hitTestRenderer.CalculatePillBounds(960, 116, hitTestFrame);
+#if WINDOWS
+        using (var shadowRenderer = new IslandRenderer())
+        using (var shadowSurface = SKSurface.Create(new SKImageInfo(960, 116)))
+        {
+            shadowRenderer.SetScreenMapping(new PixelPoint(0, 0), new PixelRect(0, 0, 1920, 1080), 1);
+            byte ShadowAlpha(bool acrylic)
+            {
+                shadowSurface.Canvas.Clear(SKColors.Transparent);
+                shadowRenderer.SetAcrylic(acrylic);
+                shadowRenderer.Draw(shadowSurface.Canvas, 960, 116, hitTestFrame, pillBounds);
+                using var shadowImage = shadowSurface.Snapshot();
+                using var pixels = SKBitmap.FromImage(shadowImage);
+                return pixels.GetPixel((int)pillBounds.Center.X, (int)pillBounds.Bottom + 5).Alpha;
+            }
+            var normalShadow = ShadowAlpha(false);
+            Require(normalShadow > 0 && ShadowAlpha(true) == normalShadow,
+                "acrylic and ordinary islands share the same exterior shadow");
+        }
+#endif
         Require(IslandRenderer.HitTest(pillBounds, new Point(480, 58)), "island hit test");
         Require(!IslandRenderer.HitTest(pillBounds, new Point(0, 0)), "transparent hit test");
         var avatarBounds = IslandRenderer.AvatarBounds(pillBounds, 1d, 1d);
