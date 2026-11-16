@@ -2,7 +2,7 @@
 ; Build with build-installer.ps1 (passes /DAppVersion=<version> to ISCC).
 
 #ifndef AppVersion
-  #define AppVersion "0.1.14"
+  #define AppVersion "0.1.17"
 #endif
 
 [Setup]
@@ -33,6 +33,7 @@ VersionInfoCompany=reject111
 VersionInfoDescription=Kashishu Setup
 VersionInfoProductName=Kashishu
 CloseApplications=yes
+CloseApplicationsFilter=Kashishu.exe,LyricifyIsland.exe
 RestartApplications=no
 
 [Tasks]
@@ -43,6 +44,12 @@ Source: "..\dist\Kashishu.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
+[InstallDelete]
+Type: files; Name: "{app}\LyricifyIsland.exe"
+Type: files; Name: "{app}\licenses\LyricifyIsland-Apache-2.0.txt"
+Type: files; Name: "{userprograms}\Lyricify Island.lnk"
+Type: files; Name: "{userdesktop}\Lyricify Island.lnk"
+
 [Icons]
 Name: "{userprograms}\Kashishu"; Filename: "{app}\Kashishu.exe"
 Name: "{userdesktop}\Kashishu"; Filename: "{app}\Kashishu.exe"; Tasks: desktopicon
@@ -52,5 +59,13 @@ Filename: "{app}\Kashishu.exe"; Description: "{cm:LaunchProgram,Kashishu}"; Flag
 
 [Registry]
 ; The app writes its own auto-start entry; remove it when the app is uninstalled.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "LyricifyIsland"; Flags: dontcreatekey uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Kashishu"; ValueData: """{app}\Kashishu.exe"""; Flags: uninsdeletevalue; Check: HasExistingAutostart
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "LyricifyIsland"; Flags: dontcreatekey deletevalue uninsdeletevalue
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Kashishu"; Flags: dontcreatekey uninsdeletevalue
+
+[Code]
+function HasExistingAutostart: Boolean;
+begin
+  Result := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'LyricifyIsland') or
+    RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Kashishu');
+end;

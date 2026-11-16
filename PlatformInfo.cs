@@ -99,21 +99,45 @@ internal static class AppPaths
         MigrateBrandDirectory(CacheHome());
     }
 
-    private static void MigrateBrandDirectory(string home)
+    internal static void MigrateBrandDirectory(string home)
     {
         var source = Path.Combine(home, "lyricify-island");
         var destination = Path.Combine(home, "kashishu");
-        if (!Directory.Exists(source) || Directory.Exists(destination))
+        if (!Directory.Exists(source))
             return;
         try
         {
             Directory.CreateDirectory(home);
-            Directory.Move(source, destination);
+            if (!Directory.Exists(destination))
+                Directory.Move(source, destination);
+            else
+                MergeLegacyDirectory(source, destination);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine($"[migration] could not move {source}: {exception.Message}");
         }
+    }
+
+    private static void MergeLegacyDirectory(string source, string destination)
+    {
+        // A previous launch can create the new settings directory before tokens or caches
+        // are migrated. Keep newer files and recover missing files; never follow links.
+        if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0
+            || (Directory.Exists(destination)
+                && (File.GetAttributes(destination) & FileAttributes.ReparsePoint) != 0))
+            return;
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            var target = Path.Combine(destination, Path.GetFileName(file));
+            if (!File.Exists(target) && (File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0)
+                File.Move(file, target);
+        }
+        foreach (var directory in Directory.EnumerateDirectories(source))
+            MergeLegacyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+        if (!Directory.EnumerateFileSystemEntries(source).Any())
+            Directory.Delete(source);
     }
 
     private static string? Rooted(string? value) =>

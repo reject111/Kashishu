@@ -240,7 +240,15 @@ internal sealed class SpotifyService : IPlaybackSource
                         spotifyTrack.DurationMs,
                         [],
                         []);
-                currentTrack = currentTrack with { AlbumArtUrl = spotifyTrack.AlbumArtUrl };
+                currentTrack = currentTrack with
+                {
+                    Title = spotifyTrack.Title,
+                    Artists = spotifyTrack.Artists,
+                    Album = spotifyTrack.Album,
+                    DurationMs = spotifyTrack.DurationMs,
+                    AlbumArtUrl = spotifyTrack.AlbumArtUrl,
+                    ShareUrl = spotifyTrack.ShareUrl
+                };
                 Volatile.Write(ref _track, currentTrack);
                 Volatile.Write(ref _loadingTrack, currentTrack);
                 _store.Update(new PlaybackSnapshot(currentTrack, position, reportedAt, isPlaying,
@@ -977,7 +985,10 @@ internal sealed class SpotifyService : IPlaybackSource
         var id = GetString(item, "id") ?? GetString(item, "uri")
             ?? $"local:{title}:{duration}:{string.Join(',', artists)}";
         return new SourceTrack(
-            id, title, artists, artistIds, albumArtists, albumName, duration, isrc, albumArtUrl);
+            id, title, artists, artistIds, albumArtists, albumName, duration, isrc, albumArtUrl)
+        {
+            ShareUrl = SongBanner.SpotifyUrl(id, PlaybackSourcePreference.Spotify)
+        };
     }
 
     private static ImmutableArray<string> Names(JsonElement parent, string property)

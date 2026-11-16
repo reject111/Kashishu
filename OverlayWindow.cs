@@ -8,6 +8,7 @@ using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Rendering.SceneGraph;
@@ -499,9 +500,27 @@ public sealed class OverlayWindow : Window
                 if (snapshot.Track is not null)
                     _showBanner();
                 break;
+            case IslandIconAction.CopyLink:
+                if (snapshot.Track is { ShareUrl: not null } track && track.Id == pressedTrackId)
+                    _ = CopyTrackLinkAsync(track);
+                break;
             case IslandIconAction.TemporaryHide:
                 _ = HideTemporarilyAsync();
                 break;
+        }
+    }
+
+    private async Task CopyTrackLinkAsync(TrackInfo track)
+    {
+        try
+        {
+            var clipboard = Clipboard ?? throw new InvalidOperationException("剪贴板不可用");
+            var artists = track.Artists.IsDefaultOrEmpty ? "未知艺术家" : string.Join(" / ", track.Artists);
+            await clipboard.SetTextAsync($"{track.Title} - {artists}\n{track.ShareUrl}");
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[island] 复制歌曲链接失败：{exception.Message}");
         }
     }
 
@@ -941,6 +960,7 @@ public sealed class IslandControl : Control, IDisposable
         IslandIconAction.Previous => !busy && snapshot.Track is not null && snapshot.Controls.CanPrevious,
         IslandIconAction.Next => !busy && snapshot.Track is not null && snapshot.Controls.CanNext,
         IslandIconAction.Banner => snapshot.Track is not null,
+        IslandIconAction.CopyLink => snapshot.Track?.ShareUrl is not null,
         IslandIconAction.TemporaryHide => true,
         _ => false
     };
@@ -2502,6 +2522,27 @@ internal sealed class IslandRenderer : IDisposable
                 canvas.DrawPath(_favoritePath, _favoritePaint);
                 _favoritePaint.Style = SKPaintStyle.Fill;
                 canvas.DrawCircle(-3.8f, -2.2f, 1.35f, _favoritePaint);
+                break;
+            case IslandIconAction.CopyLink:
+                _favoritePaint.Style = SKPaintStyle.Stroke;
+                _favoritePaint.StrokeWidth = 1.8f;
+                _favoritePath.Reset();
+                _favoritePath.MoveTo(-1.8f, 5.0f);
+                _favoritePath.LineTo(-3.4f, 6.6f);
+                _favoritePath.CubicTo(-5.0f, 8.2f, -7.6f, 8.2f, -9.2f, 6.6f);
+                _favoritePath.CubicTo(-10.8f, 5.0f, -10.8f, 2.4f, -9.2f, 0.8f);
+                _favoritePath.LineTo(-5.5f, -2.9f);
+                _favoritePath.CubicTo(-3.9f, -4.5f, -1.4f, -4.5f, 0.2f, -3.1f);
+                canvas.DrawPath(_favoritePath, _favoritePaint);
+                _favoritePath.Reset();
+                _favoritePath.MoveTo(1.8f, -5.0f);
+                _favoritePath.LineTo(3.4f, -6.6f);
+                _favoritePath.CubicTo(5.0f, -8.2f, 7.6f, -8.2f, 9.2f, -6.6f);
+                _favoritePath.CubicTo(10.8f, -5.0f, 10.8f, -2.4f, 9.2f, -0.8f);
+                _favoritePath.LineTo(5.5f, 2.9f);
+                _favoritePath.CubicTo(3.9f, 4.5f, 1.4f, 4.5f, -0.2f, 3.1f);
+                canvas.DrawPath(_favoritePath, _favoritePaint);
+                canvas.DrawLine(-3.2f, 3.2f, 3.2f, -3.2f, _favoritePaint);
                 break;
             case IslandIconAction.TemporaryHide:
                 _favoritePaint.Style = SKPaintStyle.Stroke;

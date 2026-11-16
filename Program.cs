@@ -19,6 +19,7 @@ internal sealed record LaunchOptions(bool Demo, string? SnapshotPath, double? Ex
 {
     public bool LyricsWindow { get; init; }
     public bool Headphones { get; init; }
+    public bool UiSelfTest { get; init; }
     public static LaunchOptions Parse(string[] args)
     {
         string? ValueAfter(string name)
@@ -28,8 +29,11 @@ internal sealed record LaunchOptions(bool Demo, string? SnapshotPath, double? Ex
         }
 
         var exitAfter = double.TryParse(ValueAfter("--exit-after"), out var seconds) ? (double?)seconds : null;
-        return new LaunchOptions(args.Contains("--demo"), ValueAfter("--snapshot"), exitAfter)
-        { LyricsWindow = args.Contains("--lyrics-window"), Headphones = args.Contains("--headphones") };
+        return new LaunchOptions(args.Contains("--demo") || args.Contains("--ui-self-test"), ValueAfter("--snapshot"), exitAfter)
+        {
+            LyricsWindow = args.Contains("--lyrics-window"), Headphones = args.Contains("--headphones"),
+            UiSelfTest = args.Contains("--ui-self-test")
+        };
     }
 }
 
@@ -53,7 +57,7 @@ internal static class Program
             { Controls = new PlaybackControls(true, false, false, true) };
             renderer.Draw(surface.Canvas, 1120, 720,
                 new LyricsWindowFrame(snapshot, 9_650, 9_650, 10, true, false, false, false,
-                    false, null, null, null, new Point(-1, -1), false));
+                    false, null, null, new Point(-1, -1), false));
             using var image = surface.Snapshot();
             using var data = image.Encode(SKEncodedImageFormat.Png, 100);
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(lyricsPath))!);
@@ -76,7 +80,8 @@ internal static class Program
 
         AppPaths.MigrateLegacyWindowsBrandData();
 #if WINDOWS
-        Autostart.MigrateLegacyWindowsRunEntry();
+        if (!Options.UiSelfTest)
+            Autostart.MigrateLegacyWindowsRunEntry();
 #endif
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
@@ -189,6 +194,24 @@ public sealed class App : Application
             if (Program.Options.Headphones && HeadphoneService.IsSupported)
                 Dispatcher.UIThread.Post(ShowHeadphones);
             Dispatcher.UIThread.Post(SyncMacGlassIsland, DispatcherPriority.Loaded);
+
+            if (Program.Options.UiSelfTest)
+                Dispatcher.UIThread.Post(async () =>
+                {
+                    try
+                    {
+                        ShowSettings();
+                        await UiSelfCheck.RunAsync(_lyricsWindow!, () => _settings,
+                            value => ApplySettings(value, false));
+                        Console.WriteLine("ui-self-test: ok");
+                        desktop.Shutdown(0);
+                    }
+                    catch (Exception exception)
+                    {
+                        Console.Error.WriteLine($"ui-self-test: {exception}");
+                        desktop.Shutdown(1);
+                    }
+                });
 
             if (Program.Options.ExitAfterSeconds is { } seconds)
                 _ = ExitLaterAsync(desktop, seconds, _shutdown.Token);
@@ -566,8 +589,8 @@ public sealed class App : Application
         else
         {
             _lyricsWindow = new LyricsWindow(_store!, _settings, _appIcon, ControlPlaybackAsync,
-                () => new SettingsPage(_settings, ApplySettings, () => _settings, RefreshCurrentTrack,
-                    () => _store?.Snapshot, _aiLyricsTranslation!),
+                showToast => new SettingsPage(_settings, ApplySettings, () => _settings, RefreshCurrentTrack,
+                    () => _store?.Snapshot, _aiLyricsTranslation!, showToast),
                 () => new BannerPage(_store!, () => _settings),
                 value => ApplySettings(_settings with { ShowTranslation = value }, false),
                 value => ApplySettings(_settings with { ShowIsland = value }, false), _headphones!);
@@ -1422,7 +1445,7 @@ internal static class SelfCheck
                     }
                     windowRenderer.Draw(windowSurface.Canvas, 960, 640,
                         new LyricsWindowFrame(snapshot, pos, pos, offsetMs / 1_000d, true, false, false, false, false,
-                            null, null, null, new Point(-1, -1), false)
+                            null, null, new Point(-1, -1), false)
                         {
                             EnglishWordEffects = true,
                             LyricsLift = liftEnabled,
@@ -1466,6 +1489,24 @@ internal static class SelfCheck
         try
         {
             Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", configHome);
+            var legacy = Path.Combine(configHome, "lyricify-island");
+            var migrated = Path.Combine(configHome, "kashishu");
+            Directory.CreateDirectory(Path.Combine(legacy, "tracks", "translations"));
+            File.WriteAllText(Path.Combine(legacy, "spotify-token.json"), "test-token");
+            File.WriteAllText(Path.Combine(legacy, "tracks", "translations", "test.json"), "test-translation");
+            AppPaths.MigrateBrandDirectory(configHome);
+            Require(!Directory.Exists(legacy)
+                    && File.ReadAllText(Path.Combine(migrated, "spotify-token.json")) == "test-token",
+                "legacy Windows data directory migration");
+            Directory.CreateDirectory(legacy);
+            File.WriteAllText(Path.Combine(legacy, "spotify-token.json"), "older-token");
+            File.WriteAllText(Path.Combine(legacy, "missing.json"), "recover-me");
+            AppPaths.MigrateBrandDirectory(configHome);
+            AppPaths.MigrateBrandDirectory(configHome);
+            Require(File.ReadAllText(Path.Combine(migrated, "spotify-token.json")) == "test-token"
+                    && File.ReadAllText(Path.Combine(migrated, "missing.json")) == "recover-me"
+                    && File.Exists(Path.Combine(migrated, "tracks", "translations", "test.json")),
+                "partial migration preserves newer files and recovers missing data idempotently");
             var defaults = SettingsStore.Load();
             Require(defaults.LeftIconAction == IslandIconAction.LyricsWindow
                     && defaults.RightIconAction == IslandIconAction.Favorite

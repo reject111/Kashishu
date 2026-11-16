@@ -39,7 +39,7 @@ jobs:
 
       - name: Self test
         shell: pwsh
-        run: ./dist/Kashishu.exe --self-test
+        run: ./packaging/test-windows.ps1
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-version="${1:-0.1.14}"
+version="${1:-0.1.17}"
 topdir="$(mktemp -d)"
 trap 'rm -rf -- "$topdir"' EXIT
 
@@ -15,7 +15,8 @@ install -m755 "$project_dir/dist/Kashishu" "$topdir/SOURCES/Kashishu"
 install -m644 "$project_dir/dist/THIRD_PARTY_NOTICES.md" "$topdir/SOURCES/THIRD_PARTY_NOTICES.md"
 install -m644 "$project_dir/dist/licenses/"*.txt "$topdir/SOURCES/"
 install -m644 "$project_dir/packaging/kashishu.desktop" "$topdir/SOURCES/kashishu.desktop"
-install -m644 "$project_dir/vendor/Lyricify-Lyrics-Helper/Lyricify.Lyrics.Helper/Resources/icon.png" "$topdir/SOURCES/kashishu.png"
+install -m644 "$project_dir/Resources/Icons/kashishu.png" "$topdir/SOURCES/kashishu.png"
+install -m644 "$project_dir/Resources/Icons/kashishu.svg" "$topdir/SOURCES/kashishu.svg"
 
 cat >"$topdir/SPECS/kashishu.spec" <<EOF
 %global __strip /bin/true
@@ -37,6 +38,7 @@ Wayland desktop lyrics island for Spotify and local MPRIS players.
 install -Dm755 %{_sourcedir}/Kashishu %{buildroot}%{_bindir}/Kashishu
 install -Dm644 %{_sourcedir}/kashishu.desktop %{buildroot}%{_datadir}/applications/kashishu.desktop
 install -Dm644 %{_sourcedir}/kashishu.png %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/kashishu.png
+install -Dm644 %{_sourcedir}/kashishu.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/kashishu.svg
 
 install -Dm644 %{_sourcedir}/THIRD_PARTY_NOTICES.md %{buildroot}%{_docdir}/%{name}/THIRD_PARTY_NOTICES.md
 install -Dm644 %{_sourcedir}/Kashishu-Apache-2.0.txt %{buildroot}%{_licensedir}/%{name}/Kashishu-Apache-2.0.txt
@@ -52,6 +54,7 @@ install -Dm644 %{_sourcedir}/Microsoft-MIT.txt %{buildroot}%{_licensedir}/%{name
 %{_bindir}/Kashishu
 %{_datadir}/applications/kashishu.desktop
 %{_datadir}/icons/hicolor/128x128/apps/kashishu.png
+%{_datadir}/icons/hicolor/scalable/apps/kashishu.svg
 EOF
 
 rpmbuild -bb --define "_topdir $topdir" "$topdir/SPECS/kashishu.spec"

@@ -47,5 +47,5 @@ desktop.ini
 *.orig
 *.rej
 
-# Local code-review notes
-docs/code-review*.md
+# Local Markdown documentation
+docs/**/*.md

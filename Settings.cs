@@ -39,7 +39,8 @@ internal enum IslandIconAction
     Previous,
     Next,
     Banner,
-    TemporaryHide
+    TemporaryHide,
+    CopyLink
 }
 
 internal enum LyricsLiftMode
@@ -345,6 +346,7 @@ internal static class SettingsStore
             ScalePercent = NormalizeScalePercent(settings.ScalePercent),
             SpotifyClientId = settings.SpotifyClientId?.Trim() ?? string.Empty,
             SpotifyClientSecret = settings.SpotifyClientSecret?.Trim() ?? string.Empty,
+            AiTranslationEnabled = settings.AiTranslationEnabled && !string.IsNullOrWhiteSpace(settings.AiTranslationApiKey),
             AiTranslationApiKey = settings.AiTranslationApiKey?.Trim() ?? string.Empty,
             AiTranslationBaseUrl = string.IsNullOrWhiteSpace(settings.AiTranslationBaseUrl)
                 ? DefaultAiTranslationBaseUrl : settings.AiTranslationBaseUrl.Trim().TrimEnd('/'),
@@ -539,10 +541,14 @@ internal static class Autostart
         try
         {
             using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
-            if (key?.GetValue("LyricifyIsland") is not string legacy)
+            if (key?.GetValue("LyricifyIsland") is not string)
                 return;
             if (key.GetValue(RunValueName) is null)
-                key.SetValue(RunValueName, legacy);
+            {
+                if (string.IsNullOrWhiteSpace(Environment.ProcessPath))
+                    return;
+                key.SetValue(RunValueName, $"\"{Environment.ProcessPath}\"");
+            }
             key.DeleteValue("LyricifyIsland", throwOnMissingValue: false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException

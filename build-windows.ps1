@@ -36,9 +36,12 @@ try {
     Copy-Item "$PSScriptRoot\LICENSE" "$PSScriptRoot\dist\licenses\Kashishu-Apache-2.0.txt" -Force
     Copy-Item "$PSScriptRoot\licenses\OppoPodsManager-GPL-3.0.txt" "$PSScriptRoot\dist\licenses\" -Force
     Copy-Item "$PSScriptRoot\licenses\NWayland-MIT.txt" "$PSScriptRoot\dist\licenses\" -Force
+    Copy-Item "$PSScriptRoot\licenses\OpenAI-MIT.txt" "$PSScriptRoot\dist\licenses\" -Force
+    Copy-Item "$PSScriptRoot\licenses\Microsoft-MIT.txt" "$PSScriptRoot\dist\licenses\" -Force
     Copy-Item "$PSScriptRoot\vendor\Lyricify-Lyrics-Helper\LICENSE" `
         "$PSScriptRoot\dist\licenses\Lyricify-Lyrics-Helper-Apache-2.0.txt" -Force
 
+    & "$PSScriptRoot\packaging\clean-windows-legacy.ps1"
     Write-Host "Built $PSScriptRoot\dist\Kashishu.exe"
 }
 finally {

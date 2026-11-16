@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Rendering.SceneGraph;
@@ -18,6 +19,15 @@ internal sealed class LyricsWindow : Window
 {
     private readonly LyricsWindowControl _lyrics;
     private readonly PanelHost _panel;
+    private readonly TextBlock _toastText = new()
+    {
+        FontSize = 13,
+        Foreground = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)),
+        TextTrimming = TextTrimming.CharacterEllipsis,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+    private readonly Border _toast;
+    private readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromSeconds(6) };
     private NativeOverlay? _inputShape;
     private WindowState _beforeFullScreen = WindowState.Normal;
     private WindowState _beforeMinimize = WindowState.Normal;
@@ -25,7 +35,7 @@ internal sealed class LyricsWindow : Window
 
     public LyricsWindow(PlaybackStore store, IslandSettings settings, WindowIcon? icon,
         Func<PlaybackCommand, CancellationToken, Task<string?>> controlPlayback,
-        Func<PanelPage> createSettings, Func<PanelPage> createBanner, Func<bool, bool> setTranslation, Func<bool, bool> setIslandVisibility,
+        Func<Action<string>, PanelPage> createSettings, Func<PanelPage> createBanner, Func<bool, bool> setTranslation, Func<bool, bool> setIslandVisibility,
         HeadphoneService headphones)
     {
         Title = "歌词 · Kashishu";
@@ -44,6 +54,22 @@ internal sealed class LyricsWindow : Window
         Background = OperatingSystem.IsMacOS() ? new SolidColorBrush(Color.FromRgb(12, 17, 24)) : Brushes.Transparent;
         CanResize = true;
         _lyrics = new LyricsWindowControl(store, settings, controlPlayback, setTranslation, setIslandVisibility, headphones);
+        _lyrics.ToastRequested += ShowToast;
+        _toast = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(240, 10, 14, 20)),
+            CornerRadius = new CornerRadius(14),
+            Height = 44,
+            MaxWidth = 660,
+            Margin = new Thickness(40, 0, 40, 24),
+            Padding = new Thickness(16, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            IsVisible = false,
+            IsHitTestVisible = false,
+            Child = _toastText
+        };
+        _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); _toast.IsVisible = false; };
         var artBytes = ImmutableArray<byte>.Empty;
         void UpdatePalette()
         {
@@ -61,7 +87,7 @@ internal sealed class LyricsWindow : Window
         LyricsTheme.ApplyCover(null);
         UpdatePalette();
         store.Changed += OnPlaybackChanged;
-        _panel = new PanelHost(createSettings, () => new HeadphonePage(headphones), createBanner,
+        _panel = new PanelHost(() => createSettings(ShowToast), () => new HeadphonePage(headphones), createBanner,
             HeadphoneService.IsSupported);
         _panel.Changed += kind =>
         {
@@ -133,7 +159,7 @@ internal sealed class LyricsWindow : Window
             if (WindowState == WindowState.Normal) BeginResizeDrag(edge, args);
         };
         // The panel sits inside the resize ring and below the drawn header, so those keep working.
-        Content = new Grid { Children = { _lyrics, _panel } };
+        Content = new Grid { Children = { _lyrics, _panel, _toast } };
         Opened += (_, _) =>
         {
             MacTitleBar.Attach(this);
@@ -164,6 +190,7 @@ internal sealed class LyricsWindow : Window
         };
         Closed += (_, _) =>
         {
+            _toastTimer.Stop();
             store.Changed -= OnPlaybackChanged;
             _inputShape?.Dispose();
             _lyrics.Dispose();
@@ -180,6 +207,14 @@ internal sealed class LyricsWindow : Window
     {
         if (WindowState == WindowState.Minimized)
             WindowState = _beforeMinimize;
+    }
+
+    private void ShowToast(string message)
+    {
+        _toastText.Text = message;
+        _toast.IsVisible = true;
+        _toastTimer.Stop();
+        _toastTimer.Start();
     }
 
     private void UpdateInputShape()
@@ -239,8 +274,6 @@ internal sealed class LyricsWindowControl : Control, IDisposable
     private IDisposable? _idleFrame;
     private readonly FrameScheduler _frameScheduler = new();
     private bool _disposed;
-    private string? _toast;
-    private double _toastUntil;
     private StandardCursorType? _cursorType;
     private PanelKind? _panelKind;
     private double _panelFrom;
@@ -248,6 +281,7 @@ internal sealed class LyricsWindowControl : Control, IDisposable
     private double _panelStart = -10;
 
     public Action<LyricsWindowAction>? WindowAction { get; set; }
+    public event Action<string>? ToastRequested;
     public Action<PointerPressedEventArgs>? MoveWindow { get; set; }
     public Action<WindowEdge, PointerPressedEventArgs>? ResizeWindow { get; set; }
     public bool FullScreen { get; set; }
@@ -368,7 +402,7 @@ internal sealed class LyricsWindowControl : Control, IDisposable
         var panelCovered = _panelKind is not null && PanelProgress(now) >= .999 && !InPanelTransition;
         if ((!_store.Snapshot.IsPlaying || panelCovered) && !_renderer.IsAnimating && !InPanelTransition)
         {
-            if (_browseScroll.HasValue || now < _toastUntil)
+            if (_browseScroll.HasValue)
             {
                 _idleFrame?.Dispose();
                 _idleFrame = DispatcherTimer.RunOnce(() =>
@@ -409,7 +443,7 @@ internal sealed class LyricsWindowControl : Control, IDisposable
             snapshot.Track is { DurationMs: > 0 } track ? track.DurationMs : double.MaxValue);
         var frame = new LyricsWindowFrame(snapshot, position, lyricPosition, _clock.Elapsed.TotalSeconds,
             _settings.ShowTranslation, LyricsOnly, Pinned, FullScreen, Maximized, _browseScroll, _seekPreview,
-            _clock.Elapsed.TotalSeconds < _toastUntil ? _toast : null, _pointer, _busy)
+            _pointer, _busy)
         {
             VolumePreview = _volumePreview,
             ShowIsland = _settings.ShowIsland,
@@ -649,12 +683,7 @@ internal sealed class LyricsWindowControl : Control, IDisposable
         finally { _busy = false; if (!_disposed) WakeRender(); }
     }
 
-    private void Toast(string message)
-    {
-        _toast = message;
-        _toastUntil = _clock.Elapsed.TotalSeconds + 6;
-        WakeRender();
-    }
+    private void Toast(string message) => ToastRequested?.Invoke(message);
 
     private void OnKeyDown(object? sender, KeyEventArgs args)
     {

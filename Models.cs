@@ -25,6 +25,7 @@ public sealed record TrackInfo(
 {
     public ImmutableArray<ImmutableArray<byte>> ArtistImageBytes { get; init; } = [];
     public string? AlbumArtUrl { get; init; }
+    public string? ShareUrl { get; init; }
     public LyricsSourcePreference? LyricsSource { get; init; }
 }
 
@@ -54,7 +55,10 @@ internal sealed record SourceTrack(
     string Album,
     long DurationMs,
     string? Isrc,
-    string? AlbumArtUrl);
+    string? AlbumArtUrl)
+{
+    public string? ShareUrl { get; init; }
+}
 
 internal interface IPlaybackSource
 {

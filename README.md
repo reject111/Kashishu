@@ -2,6 +2,8 @@
 
 **原项目由 AI 编写，由大肥鱼完成 Windows/macOS 平台适配**
 
+https://github.com/user-attachments/assets/bc65054e-03d4-4007-9032-1123cf56aa45
+
 Windows / macOS / Linux 桌面歌词岛。当前曲目和播放进度可来自 Spotify Web API 或本机播放器
 （Windows 使用系统媒体会话 SMTC，macOS 使用 Spotify / Music 的脚本接口，Linux 使用 MPRIS）；逐字歌词与翻译通过
 [Lyricify Lyrics Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) 获取和解析。
@@ -278,6 +280,11 @@ FreeClip、FreeArc 和眼镜不显示降噪选项；眼镜只显示左右镜腿�
 `--demo --exit-after 5` 可用于五秒启动冒烟检查。Windows 上把 `./run.sh` 换成
 `.\run-windows.ps1`（或 `.\dist\Kashishu.exe`），macOS 上换成 `./run-macos.sh`
 （或 `./dist/LyricifyIsland`），输出路径换成对应平台的路径即可。
+
+Windows 构建完成后可运行 `./packaging/test-windows.ps1`：使用隔离的配置、状态与缓存目录，
+对最终单文件程序执行渲染与数据自检，并实际打开设置页，验证八个分区、开关同步、分享图页面切换、
+窗口尺寸变化和 AI 翻译连接校验。AI 校验使用本机模拟接口，不使用真实 API Key。
+日志保存在 `artifacts/windows-test-*/`；Windows 发布构建会运行同一组检查。
 
 ## 调整
 

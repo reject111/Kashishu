@@ -53,7 +53,8 @@ internal sealed class SettingsPage : PanelPage
         Func<IslandSettings> currentSettings,
         Func<bool> refreshCurrentTrack,
         Func<PlaybackSnapshot?> currentSnapshot,
-        AiLyricsTranslation aiTranslation)
+        AiLyricsTranslation aiTranslation,
+        Action<string> showToast)
     {
         var settings = SettingsStore.Normalize(initialSettings);
         var synchronizing = false;
@@ -520,7 +521,6 @@ internal sealed class SettingsPage : PanelPage
                     [(1, "1 档"), (2, "2 档"), (3, "3 档"), (4, "4 档"), (5, "5 档")],
                     settings.IslandGlowIntensity,
                     value => Commit(settings with { IslandGlowIntensity = value }))),
-            Ui.Row("显示翻译", "有翻译时在原文下方显示", translationToggle),
             Ui.Row("英文整词特效", "开启后英文歌词按整个单词产生跳字与发光特效，而非逐个字母",
                 Switch("英文整词特效", settings.EnglishWordEffects,
                     value => Commit(settings with { EnglishWordEffects = value }))),
@@ -555,12 +555,13 @@ internal sealed class SettingsPage : PanelPage
         static string InputValue(string? text, string fallback = "") =>
             string.IsNullOrWhiteSpace(text) ? fallback : text.Trim();
 
-        void SaveTranslationValue(Control field, Func<IslandSettings, IslandSettings> update)
+        bool SaveTranslationValue(Control field, Func<IslandSettings, IslandSettings> update)
         {
             var latest = currentSettings();
             var updated = update(latest);
             var saved = updated == latest || Commit(updated);
             DataValidationErrors.SetErrors(field, saved ? null : ["保存失败，请查看终端错误"]);
+            return saved;
         }
 
         static void SaveOnEditCompleted(Control field, Action save)
@@ -608,11 +609,45 @@ internal sealed class SettingsPage : PanelPage
         aiBaseUrl.Width = translationFieldWidth;
         aiModel.Width = translationFieldWidth;
 
-        SaveOnEditCompleted(aiApiKey, () => SaveTranslationValue(aiApiKey, latest => latest with
+        var aiToggle = Ui.Toggle("启用 AI 歌词翻译", settings.AiTranslationEnabled);
+        CancellationTokenSource? aiTest = null;
+        var syncingAiToggle = false;
+
+        void SetAiToggle(bool value)
         {
-            AiTranslationApiKey = InputValue(aiApiKey.Text)
-        }));
-        SaveOnEditCompleted(aiBaseUrl, () =>
+            syncingAiToggle = true;
+            aiToggle.IsChecked = value;
+            syncingAiToggle = false;
+        }
+
+        void RefreshAiToggle() =>
+            aiToggle.IsEnabled = aiTest is null && !string.IsNullOrWhiteSpace(aiApiKey.Text);
+
+        void CancelAiTest(bool settingsChanged = false)
+        {
+            if (aiTest is not { } request)
+                return;
+            aiTest = null;
+            request.Cancel();
+            SetAiToggle(false);
+            RefreshAiToggle();
+            if (settingsChanged)
+                showToast("连接设置已更改，请重新测试");
+        }
+
+        bool SaveApiKey()
+        {
+            var saved = SaveTranslationValue(aiApiKey, latest => latest with
+            {
+                AiTranslationApiKey = InputValue(aiApiKey.Text)
+            });
+            if (saved)
+                SetAiToggle(currentSettings().AiTranslationEnabled);
+            RefreshAiToggle();
+            return saved;
+        }
+
+        bool SaveBaseUrl()
         {
             var baseUrl = InputValue(aiBaseUrl.Text, SettingsStore.DefaultAiTranslationBaseUrl);
             if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
@@ -622,22 +657,98 @@ internal sealed class SettingsPage : PanelPage
                 || !string.IsNullOrEmpty(uri.Fragment))
             {
                 DataValidationErrors.SetErrors(aiBaseUrl, ["请输入有效的 HTTP 或 HTTPS 地址"]);
-                return;
+                return false;
             }
-            SaveTranslationValue(aiBaseUrl, latest => latest with { AiTranslationBaseUrl = baseUrl.TrimEnd('/') });
-        });
-        SaveOnEditCompleted(aiModel, () => SaveTranslationValue(aiModel, latest => latest with
+            return SaveTranslationValue(aiBaseUrl, latest => latest with { AiTranslationBaseUrl = baseUrl.TrimEnd('/') });
+        }
+
+        bool SaveModel() => SaveTranslationValue(aiModel, latest => latest with
         {
             AiTranslationModel = InputValue(aiModel.Text, SettingsStore.DefaultAiTranslationModel)
-        }));
+        });
+
+        SaveOnEditCompleted(aiApiKey, () => SaveApiKey());
+        SaveOnEditCompleted(aiBaseUrl, () => SaveBaseUrl());
+        SaveOnEditCompleted(aiModel, () => SaveModel());
+        aiApiKey.TextChanged += (_, _) =>
+        {
+            CancelAiTest(settingsChanged: true);
+            if (string.IsNullOrWhiteSpace(aiApiKey.Text))
+            {
+                if (currentSettings().AiTranslationEnabled && !SaveApiKey())
+                    showToast("保存失败，请重试");
+                SetAiToggle(false);
+            }
+            RefreshAiToggle();
+        };
+        aiBaseUrl.TextChanged += (_, _) => CancelAiTest(settingsChanged: true);
+        aiModel.TextChanged += (_, _) => CancelAiTest(settingsChanged: true);
+        DetachedFromVisualTree += (_, _) => CancelAiTest();
+        RefreshAiToggle();
+
+        async Task RunAiTestAsync(CancellationTokenSource request)
+        {
+            try
+            {
+                if (!ReferenceEquals(aiTest, request))
+                    return;
+                SetAiToggle(false);
+                if (!SaveApiKey() || !SaveBaseUrl() || !SaveModel())
+                {
+                    showToast("测试失败：请检查翻译设置");
+                    return;
+                }
+                showToast("正在测试 AI 歌词翻译连接…");
+                var error = await AiLyricsTranslation.TestConnectionAsync(currentSettings(), request.Token);
+                if (!ReferenceEquals(aiTest, request))
+                    return;
+                if (error is not null)
+                    showToast(error);
+                else if (Commit(currentSettings() with { AiTranslationEnabled = true }))
+                {
+                    SetAiToggle(true);
+                    showToast("测试通过，AI 歌词翻译已开启");
+                }
+                else
+                    showToast("保存失败，请重试");
+            }
+            catch (OperationCanceledException) when (request.IsCancellationRequested) { }
+            finally
+            {
+                if (ReferenceEquals(aiTest, request))
+                {
+                    aiTest = null;
+                    RefreshAiToggle();
+                }
+                request.Dispose();
+            }
+        }
+
+        aiToggle.IsCheckedChanged += (_, _) =>
+        {
+            if (syncingAiToggle)
+                return;
+            if (aiToggle.IsChecked != true)
+            {
+                if (!Commit(currentSettings() with { AiTranslationEnabled = false }))
+                {
+                    Dispatcher.UIThread.Post(() => SetAiToggle(currentSettings().AiTranslationEnabled));
+                    showToast("保存失败，请重试");
+                }
+                return;
+            }
+
+            var request = new CancellationTokenSource();
+            aiTest = request;
+            RefreshAiToggle();
+            Dispatcher.UIThread.Post(async () => await RunAiTestAsync(request));
+        };
 
         var translationSection = Ui.Section(
             "翻译",
             "控制歌词译文的显示和生成，输入完成后自动保存",
             Ui.Row("显示翻译", "在歌词原文下方显示译文", translationToggle),
-            Ui.Row("AI 歌词翻译", "没有现成译文时自动翻译当前歌曲",
-                Switch("启用 AI 歌词翻译", settings.AiTranslationEnabled,
-                    value => Commit(settings with { AiTranslationEnabled = value }))),
+            Ui.Row("AI 歌词翻译", "没有现成译文时自动翻译当前歌曲", aiToggle),
             Ui.Row("目标语言", "可选择或输入语言", translationLanguage),
             Ui.Row("API Key", "密钥保存在本机", aiApiKey),
             Ui.Row("Base URL", "歌词会发送到此地址", aiBaseUrl),
@@ -746,6 +857,7 @@ internal sealed class SettingsPage : PanelPage
             (IslandIconAction.Previous, "上一首"),
             (IslandIconAction.Next, "下一首"),
             (IslandIconAction.Banner, "分享图"),
+            (IslandIconAction.CopyLink, "复制链接"),
             (IslandIconAction.TemporaryHide, "临时隐藏")
         };
 
