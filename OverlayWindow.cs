@@ -2678,7 +2678,10 @@ internal sealed class IslandRenderer : IDisposable
                 _aiBadgeBackground.Color = new SKColor(255, 255, 255, (byte)(32 * opacity));
                 _aiBadgeText.Color = new SKColor(220, 221, 224, (byte)(220 * opacity));
                 canvas.DrawRoundRect(badge, 4f, 4f, _aiBadgeBackground);
-                canvas.DrawText("AI", badgeLeft + 5f, baseline - 1f, _aiBadgeFont, _aiBadgeText);
+                if (OperatingSystem.IsMacOS())
+                    MacPanelTheme.DrawBadgeLabel(canvas, badge, _aiBadgeFont, _aiBadgeText);
+                else
+                    canvas.DrawText("AI", badgeLeft + 5f, baseline - 1f, _aiBadgeFont, _aiBadgeText);
             }
         }
         canvas.Restore();

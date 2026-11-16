@@ -10,6 +10,10 @@
 
 - 只有一个 `.regular` 的 `NSGlassEffectView`，不使用换行背景脉冲、额外材质、黑色遮罩或自绘反光。
 - 主歌词使用 26pt 系统 semibold，翻译使用 16pt medium；暂停不缩放字形。
+- CoreText 保留字形塑形和字体回退，歌词升起保持/波浪回落与泛光五档参考 Linux 的时序。
+  下一句预先排版，逐字高亮使用连续渐变，避免跨字形时突然变亮；减少动态效果同时关闭逐字升降。
+- AI 译文显示按字形实际边界居中的 `AI` 徽标，计入长译文滚动范围。
+  两侧复制链接操作按当前歌曲和公开链接能力启用，过期歌曲的动作由主程序拒绝。
 - 正常换行在 340ms 内完成：旧句在 200ms 内上移、淡出并逐渐失焦，新句从下方进入且在 160ms 内恢复清晰。
   模糊使用公开的 `CIGaussianBlur`，只处理带透明边距的文字图像；第一次使用前预热 Core Image。
 - 旧句及中断中的过渡先冻结成文字图像，保留高亮、滚动位置和排版；新句的文字视口一次确定。
@@ -25,22 +29,23 @@
 在仓库根目录运行时钟和动画回归测试：
 
 ```sh
-bash packaging/test-macos-glass-island.sh /tmp/lyricify-glass-tests
+bash packaging/test-macos-glass-island.sh /tmp/kashishu-glass-tests
 ```
 
 采集深色、浅色与减少动态效果的原生窗口连续帧，并检查歌词边界、背景亮度与暂停尺寸：
 
 ```sh
-bash packaging/test-macos-glass-island.sh /tmp/lyricify-glass-tests --visual
+bash packaging/test-macos-glass-island.sh /tmp/kashishu-glass-tests --visual
 ```
 
 视觉测试通过单独的 `.app` 启动，每种模式运行约 8 秒，输出逐帧 PNG、JSON、接触表与绘制耗时。
 快照和测试场景仅编入 Debug，Release helper 不包含这些入口。
 
-构建应用后，可运行隔离配置下的协议、菜单入口、异常消息与进程回退测试（需要 Command Line Tools 提供的 Python 3）：
+构建应用后，可运行隔离配置下的 v2 协议、新设置转发、菜单入口、异常消息与进程回退测试，
+以及真实设置页、AI 连接和窗口状态自检（需要 Command Line Tools 提供的 Python 3）：
 
 ```sh
-bash packaging/test-macos-integration.sh dist/LyricifyIsland.app /tmp/lyricify-macos-integration
+bash packaging/test-macos-integration.sh dist/Kashishu.app /tmp/kashishu-macos-integration
 ```
 
 测试只使用演示播放，不控制真实播放器。自动化覆盖不能替代真实 Spotify / Music 账号、首次自动化权限弹窗、

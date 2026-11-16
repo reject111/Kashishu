@@ -56,6 +56,7 @@ internal sealed class SettingsPage : PanelPage
         AiLyricsTranslation aiTranslation,
         Action<string> showToast)
     {
+        if (OperatingSystem.IsMacOS()) MacPanelTheme.Apply(this);
         var settings = SettingsStore.Normalize(initialSettings);
         var synchronizing = false;
 

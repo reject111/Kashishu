@@ -591,8 +591,7 @@ internal static class Autostart
     /// the bundle keeps its identity and automation permissions across launches.</summary>
     private static bool SetEnabledMac(bool enabled, string? executable)
     {
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Library", "LaunchAgents", "com.lyricifyisland.app.plist");
+        var path = Path.Combine(MacBrandMigration.LaunchAgentsDirectory, "com.kashishu.app.plist");
         try
         {
             if (!enabled)
@@ -634,7 +633,7 @@ internal static class Autostart
         <plist version="1.0">
         <dict>
             <key>Label</key>
-            <string>com.lyricifyisland.app</string>
+            <string>com.kashishu.app</string>
             <key>ProgramArguments</key>
             <array>
                 <string>{EscapeXml(executable)}</string>

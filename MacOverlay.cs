@@ -3,7 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>
 /// macOS counterpart of <see cref="NativeOverlay"/> and <see cref="WindowsOverlay"/>.
@@ -29,7 +29,7 @@ internal sealed class MacOverlay : IDisposable
         | (1 << 4) // Stationary
         | (1 << 6) // IgnoresCycle
         | (1 << 8); // FullScreenAuxiliary
-    private const string SubclassSuffix = "LyricifyOverlayWindow";
+    private const string SubclassSuffix = "KashishuOverlayWindow";
     private static readonly Lazy<IntPtr> OverlayWindowClass = new(CreateOverlayWindowClass);
     private static readonly BoolMethod CanBecomeKey = static (_, _) => 0;
     private static readonly BoolMethod CanBecomeMain = static (_, _) => 0;

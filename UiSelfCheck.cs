@@ -47,6 +47,13 @@ internal static class UiSelfCheck
                 "platform caption controls share the immersive header");
         }
 
+        if (OperatingSystem.IsMacOS())
+        {
+            var language = Named<ComboBox>("AI 翻译目标语言");
+            CheckTextCenter(language.GetVisualDescendants().OfType<TextBox>().Single());
+            Require(Application.Current?.Name == "Kashishu", "macOS application menu uses the product name");
+        }
+
         var translation = Named<ToggleSwitch>("显示歌词翻译");
         var original = current();
         Require(apply(original with { ShowTranslation = !original.ShowTranslation }), "external settings save");

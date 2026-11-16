@@ -5,8 +5,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Avalonia.Threading;
+using Avalonia.Input.Platform;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>
 /// Owns the native AppKit/Swift island process on macOS. The helper only knows how to draw and
@@ -15,8 +16,8 @@ namespace LyricifyIsland;
 /// </summary>
 internal sealed class MacGlassIsland : IDisposable
 {
-    private const string HelperName = "LyricifyIslandGlass";
-    private const int ProtocolVersion = 1;
+    private const string HelperName = "KashishuGlass";
+    private const int ProtocolVersion = 2;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -96,7 +97,7 @@ internal sealed class MacGlassIsland : IDisposable
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(helper)!
             };
-            startInfo.Environment["LYRICIFY_NATIVE_ISLAND"] = "1";
+            startInfo.Environment["KASHISHU_NATIVE_ISLAND"] = "1";
             var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             process.OutputDataReceived += OnOutput;
             process.ErrorDataReceived += OnError;
@@ -173,7 +174,7 @@ internal sealed class MacGlassIsland : IDisposable
 
     private static string? FindHelper()
     {
-        var overridePath = Environment.GetEnvironmentVariable("LYRICIFY_MACOS_GLASS_HELPER");
+        var overridePath = Environment.GetEnvironmentVariable("KASHISHU_MACOS_GLASS_HELPER");
         if (File.Exists(overridePath))
             return Path.GetFullPath(overridePath!);
 
@@ -340,10 +341,32 @@ internal sealed class MacGlassIsland : IDisposable
                 if (snapshot.Track is not null)
                     _showBanner();
                 break;
+            case IslandIconAction.CopyLink:
+                if (snapshot.Track is { ShareUrl: not null } track)
+                    _ = CopyTrackLinkAsync(track);
+                break;
             case IslandIconAction.TemporaryHide:
                 Send(new { type = "hide", seconds = SettingsStore.NormalizeTemporaryHideSeconds(
                     _settings.TemporaryHideSeconds) });
                 break;
+        }
+    }
+
+    private static async Task CopyTrackLinkAsync(TrackInfo track)
+    {
+        try
+        {
+            if (Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime
+                { MainWindow.Clipboard: { } clipboard })
+            {
+                var artists = track.Artists.IsDefaultOrEmpty ? "未知艺术家" : string.Join(" / ", track.Artists);
+                await clipboard.SetTextAsync($"{track.Title} - {artists}\n{track.ShareUrl}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[macos-glass] 复制歌曲链接失败：{exception.Message}");
         }
     }
 
@@ -464,6 +487,9 @@ internal sealed class MacGlassIsland : IDisposable
                 leftIconAction = _settings.LeftIconAction.ToString(),
                 rightIconAction = _settings.RightIconAction.ToString(),
                 maxFrameRate = _settings.MaximumFrameRate,
+                lyricsLift = _settings.IslandLyricsLift,
+                lyricsLiftMode = _settings.IslandLyricsLiftMode.ToString(),
+                glowIntensity = _settings.IslandGlowIntensity,
                 topOffset = _settings.TopOffset,
                 windowX = _settings.WindowX,
                 windowY = _settings.WindowY,
@@ -479,7 +505,7 @@ internal sealed class MacGlassIsland : IDisposable
         if (_sentApplicationIcon)
             return;
         using var stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream("LyricifyIsland.icon.png");
+            .GetManifestResourceStream("Kashishu.icon.png");
         if (stream is null)
             return;
         using var memory = new MemoryStream();
@@ -519,6 +545,7 @@ internal sealed class MacGlassIsland : IDisposable
                     {
                         text = line.Text,
                         translation = line.Translation,
+                        isAiTranslation = line.IsAiTranslation,
                         startMs = line.StartMs,
                         endMs = line.EndMs,
                         syllables = line.Syllables.IsDefaultOrEmpty
@@ -568,7 +595,8 @@ internal sealed class MacGlassIsland : IDisposable
                 canNext = snapshot.Controls.CanNext,
                 canFavorite = snapshot.Controls.CanFavorite,
                 isFavorite = snapshot.Controls.IsFavorite == true,
-                busy = _busy
+                busy = _busy,
+                canCopyLink = track?.ShareUrl is not null
             }
         });
     }

@@ -2,10 +2,10 @@
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-output_dir="${1:-$(mktemp -d "${TMPDIR:-/tmp}/lyricify-glass-tests.XXXXXX")}"
+output_dir="${1:-$(mktemp -d "${TMPDIR:-/tmp}/kashishu-glass-tests.XXXXXX")}"
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd)"
-module_cache="${TMPDIR:-/tmp}/lyricify-island-swift-module-cache"
+module_cache="${TMPDIR:-/tmp}/kashishu-swift-module-cache"
 mkdir -p "$module_cache"
 export CLANG_MODULE_CACHE_PATH="$module_cache"
 export SWIFT_MODULE_CACHE_PATH="$module_cache"
@@ -17,7 +17,7 @@ xcrun swiftc -parse-as-library \
 "$output_dir/IslandMotionTests"
 
 if [[ "${2:-}" == --visual ]]; then
-  app="$output_dir/LyricifyGlassVisualTest.app"
+  app="$output_dir/KashishuGlassVisualTest.app"
   mkdir -p "$app/Contents/MacOS"
   bash "$project_dir/packaging/build-macos-glass-island.sh" "$app/Contents/MacOS" "" Debug
   install -m644 "$project_dir/native/macos/Tests/VisualTest-Info.plist" "$app/Contents/Info.plist"
@@ -29,10 +29,10 @@ if [[ "${2:-}" == --visual ]]; then
     [[ "$appearance" != reduced ]] || reduced_motion=1
     /usr/bin/open -n -W \
       --stdout "$captures/stdout.log" --stderr "$captures/stderr.log" \
-      --env LYRICIFY_GLASS_VISUAL_TEST=1 \
-      --env "LYRICIFY_GLASS_CAPTURE_DIR=$captures" \
-      --env "LYRICIFY_GLASS_APPEARANCE=$appearance" \
-      --env "LYRICIFY_GLASS_REDUCE_MOTION=$reduced_motion" \
+      --env KASHISHU_GLASS_VISUAL_TEST=1 \
+      --env "KASHISHU_GLASS_CAPTURE_DIR=$captures" \
+      --env "KASHISHU_GLASS_APPEARANCE=$appearance" \
+      --env "KASHISHU_GLASS_REDUCE_MOTION=$reduced_motion" \
       "$app"
   done
   xcrun swiftc -parse-as-library \

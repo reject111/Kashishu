@@ -5,6 +5,23 @@ func islandEaseOut(_ value: Double) -> Double {
     return 1 - pow(1 - progress, 3)
 }
 
+// Same timing as the Linux reference renderer, in milliseconds.
+func islandGlyphLift(position: Double, start: Double, end: Double, syllableDuration: Double, wave: Bool) -> Double {
+    guard position > start else { return 0 }
+    if !wave { return 1 - exp(-(position - start) / 650) }
+    guard end > start else { return 0 }
+    if position <= end {
+        return 1 - pow(1 - min(max((position - start) / (end - start), 0), 1), 2.2)
+    }
+    let duration = syllableDuration > 0 ? syllableDuration : end - start
+    let hold = min(max(duration * 0.35, 90), 200)
+    let release = min(max(duration * 0.95, 320), 560)
+    let elapsed = position - end - hold
+    if elapsed <= 0 { return 1 }
+    if elapsed >= release { return 0 }
+    return 0.5 * (1 + cos(elapsed / release * .pi))
+}
+
 struct IslandPlaybackClock {
     private var trackID: String?
     private var anchorMs = 0.0

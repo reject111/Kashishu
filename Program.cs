@@ -79,6 +79,8 @@ internal static class Program
             return WriteSnapshot(Options.SnapshotPath);
 
         AppPaths.MigrateLegacyWindowsBrandData();
+        if (OperatingSystem.IsMacOS())
+            MacBrandMigration.Run(migrateAutostart: !Options.Demo);
 #if WINDOWS
         if (!Options.UiSelfTest)
             Autostart.MigrateLegacyWindowsRunEntry();
@@ -146,6 +148,22 @@ public sealed class App : Application
     private CancellationTokenSource? _playbackCancellation;
     private Task? _playbackTask;
     private IslandSettings _settings = new();
+
+    public App()
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            Name = "Kashishu";
+            var menu = new NativeMenu();
+            var lyrics = new NativeMenuItem("歌词窗口");
+            lyrics.Click += (_, _) => ShowLyricsWindow();
+            var settings = new NativeMenuItem("设置…");
+            settings.Click += (_, _) => ShowSettings();
+            menu.Add(lyrics);
+            menu.Add(settings);
+            NativeMenu.SetMenu(this, menu);
+        }
+    }
 
     public override void Initialize()
     {
@@ -399,7 +417,7 @@ public sealed class App : Application
             // foreground colour for the current menu bar appearance instead of showing the
             // full-colour app icon.
             using var templateStream = Assembly.GetExecutingAssembly()
-                .GetManifestResourceStream("LyricifyIsland.MacTrayIcon.png")
+                .GetManifestResourceStream("Kashishu.MacTrayIcon.png")
                 ?? throw new InvalidOperationException("Embedded macOS tray icon is missing");
             trayIcon = new WindowIcon(templateStream);
         }
@@ -1133,6 +1151,7 @@ internal static class SelfCheck
         Require(refreshService.RequestCurrentTrackRefresh(), "refresh current track request");
         CheckMpris();
         CheckMacMedia();
+        if (OperatingSystem.IsMacOS()) MacSelfCheck.Run();
 #if WINDOWS
         CheckWindowsMedia();
 #endif

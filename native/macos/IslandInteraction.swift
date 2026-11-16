@@ -18,6 +18,7 @@ enum IslandIcon: String {
     case next = "Next"
     case banner = "Banner"
     case temporaryHide = "TemporaryHide"
+    case copyLink = "CopyLink"
 
     func isActive(playing: Bool, favorite: Bool) -> Bool {
         switch self {

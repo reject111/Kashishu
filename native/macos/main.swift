@@ -4,17 +4,18 @@ import QuartzCore
 import ScreenCaptureKit
 #endif
 
-private let glassProtocolVersion = 1
+private let glassProtocolVersion = 2
 
-struct GlassSyllable: Decodable, Equatable {
+struct GlassSyllable: Decodable, Hashable {
     let text: String
     let startMs: Int64
     let endMs: Int64
 }
 
-struct GlassLine: Decodable, Equatable {
+struct GlassLine: Decodable, Hashable {
     let text: String
     let translation: String?
+    let isAiTranslation: Bool
     let startMs: Int64
     let endMs: Int64
     let syllables: [GlassSyllable]
@@ -43,6 +44,7 @@ private struct GlassPlayback: Decodable {
     let canFavorite: Bool
     let isFavorite: Bool
     let busy: Bool
+    let canCopyLink: Bool
 }
 
 private struct GlassSettings: Decodable {
@@ -58,6 +60,9 @@ private struct GlassSettings: Decodable {
     let leftIconAction: String
     let rightIconAction: String
     let maxFrameRate: Int
+    let lyricsLift: Bool
+    let lyricsLiftMode: String
+    let glowIntensity: Int
     let topOffset: Int
     let windowX: Int?
     let windowY: Int?
@@ -104,6 +109,7 @@ private struct LoadedPlayback {
     let canFavorite: Bool
     let isFavorite: Bool
     let busy: Bool
+    let canCopyLink: Bool
 }
 
 private struct LoadedSettings {
@@ -119,6 +125,9 @@ private struct LoadedSettings {
     let leftIconAction: IslandIcon
     let rightIconAction: IslandIcon
     let maxFrameRate: Int
+    let lyricsLift: Bool
+    let lyricsLiftMode: String
+    let glowIntensity: Int
     let topOffset: CGFloat
     let windowX: CGFloat?
     let windowY: CGFloat?
@@ -139,6 +148,9 @@ private struct LoadedSettings {
         leftIconAction: .lyricsWindow,
         rightIconAction: .favorite,
         maxFrameRate: 0,
+        lyricsLift: true,
+        lyricsLiftMode: "Stay",
+        glowIntensity: 4,
         topOffset: 58,
         windowX: nil,
         windowY: nil,
@@ -208,9 +220,6 @@ private final class GlassSurface: NSView {
             glass.style = .regular
             glass.cornerRadius = 45
             glass.contentView = contentHost
-            if glass.responds(to: NSSelectorFromString("setEffectIsInteractive:")) {
-                glass.setValue(true, forKey: "effectIsInteractive")
-            }
             effectView = glass
         } else {
             let visual = NSVisualEffectView()
@@ -274,7 +283,7 @@ private final class AppController: NSObject, NSApplicationDelegate {
     private var framePositionMs = 0.0
     private var playbackClock = IslandPlaybackClock()
     private let lyricRenderer = IslandLyricRenderer()
-    private var lyricContent = IslandLyricContent.status(title: "等待播放信息", subtitle: "Lyricify Island")
+    private var lyricContent = IslandLyricContent.status(title: "等待播放信息", subtitle: "Kashishu")
     private var outgoingLyrics: IslandLyricBitmap?
     private var lyricViewport = NSSize(width: 240, height: 70)
     private var transitionReversed = false
@@ -361,7 +370,7 @@ private final class AppController: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         installTimer()
         #if DEBUG
-        if ProcessInfo.processInfo.environment["LYRICIFY_GLASS_VISUAL_TEST"] == "1" {
+        if ProcessInfo.processInfo.environment["KASHISHU_GLASS_VISUAL_TEST"] == "1" {
             startVisualTest()
             return
         }
@@ -388,7 +397,7 @@ private final class AppController: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate()
         #if DEBUG
-        if let directory = ProcessInfo.processInfo.environment["LYRICIFY_GLASS_CAPTURE_DIR"],
+        if let directory = ProcessInfo.processInfo.environment["KASHISHU_GLASS_CAPTURE_DIR"],
            !visualDrawTimes.isEmpty {
             let times = visualDrawTimes.sorted()
             let report: [String: Any] = [
@@ -481,6 +490,7 @@ private final class AppController: NSObject, NSApplicationDelegate {
                 trackChangedAt = CACurrentMediaTime()
             }
             track = loaded
+            lyricRenderer.prepare(loaded.lyrics.prefix(3), scale: settings.scale)
             if !didReceiveTrack {
                 didReceiveTrack = true
                 log("track \(loaded.id), \(loaded.lyrics.count) lyric lines")
@@ -505,7 +515,8 @@ private final class AppController: NSObject, NSApplicationDelegate {
                 canNext: decoded.canNext,
                 canFavorite: decoded.canFavorite,
                 isFavorite: decoded.isFavorite,
-                busy: decoded.busy)
+                busy: decoded.busy,
+                canCopyLink: decoded.canCopyLink)
             scheduleDebugSnapshotIfRequested()
             pauseRetention.receive(trackID: decoded.trackId, playing: decoded.isPlaying)
             island.needsDisplay = true
@@ -527,6 +538,9 @@ private final class AppController: NSObject, NSApplicationDelegate {
                 leftIconAction: IslandIcon(rawValue: decoded.leftIconAction) ?? .none,
                 rightIconAction: IslandIcon(rawValue: decoded.rightIconAction) ?? .none,
                 maxFrameRate: decoded.maxFrameRate,
+                lyricsLift: decoded.lyricsLift,
+                lyricsLiftMode: decoded.lyricsLiftMode,
+                glowIntensity: min(max(decoded.glowIntensity, 1), 5),
                 topOffset: CGFloat(decoded.topOffset),
                 windowX: decoded.windowX.map(CGFloat.init),
                 windowY: decoded.windowY.map(CGFloat.init),
@@ -558,13 +572,13 @@ private final class AppController: NSObject, NSApplicationDelegate {
     private func scheduleDebugSnapshotIfRequested() {
         #if DEBUG
         guard !snapshotScheduled,
-              let path = ProcessInfo.processInfo.environment["LYRICIFY_GLASS_SNAPSHOT"],
+              let path = ProcessInfo.processInfo.environment["KASHISHU_GLASS_SNAPSHOT"],
               !path.isEmpty else {
             return
         }
         snapshotScheduled = true
         let delay = Double(
-            ProcessInfo.processInfo.environment["LYRICIFY_GLASS_SNAPSHOT_DELAY"] ?? ""
+            ProcessInfo.processInfo.environment["KASHISHU_GLASS_SNAPSHOT_DELAY"] ?? ""
         ) ?? 1.0
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0.1, delay)) { [weak self] in
             guard let self, self.island.bounds.width > 1 else { return }
@@ -644,14 +658,14 @@ private final class AppController: NSObject, NSApplicationDelegate {
             "trackId": "visual-test", "positionMs": position, "isPlaying": playing,
             "status": attention ? "连接播放器失败，请检查自动化权限后重试" : "",
             "attention": attention, "canPlayPause": true, "canPrevious": true,
-            "canNext": true, "canFavorite": true, "isFavorite": false, "busy": false
+            "canNext": true, "canFavorite": true, "isFavorite": false, "busy": false, "canCopyLink": true
         ])
     }
 
     private func startVisualTest() {
         visualTestStartedAt = CACurrentMediaTime()
         NSApp.appearance = NSAppearance(named:
-            ProcessInfo.processInfo.environment["LYRICIFY_GLASS_APPEARANCE"] == "light" ? .aqua : .darkAqua)
+            ProcessInfo.processInfo.environment["KASHISHU_GLASS_APPEARANCE"] == "light" ? .aqua : .darkAqua)
         let backdrop = IslandPanel(
             contentRect: window.frame.insetBy(dx: -20, dy: -60),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -679,15 +693,15 @@ private final class AppController: NSObject, NSApplicationDelegate {
             "rememberPosition": false, "lockPosition": false, "clickThrough": false,
             "pausedDisplay": "KeepVisible", "temporaryHideSeconds": 2,
             "leftIconAction": "LyricsWindow", "rightIconAction": "Favorite",
-            "maxFrameRate": 60, "topOffset": 58, "enableTrackOffsets": false, "trackOffsetMs": 0
+            "maxFrameRate": 60, "lyricsLift": true, "lyricsLiftMode": "Wave", "glowIntensity": 4, "topOffset": 58, "enableTrackOffsets": false, "trackOffsetMs": 0
         ])
         let lines: [[String: Any]] = [
             ["text": "One step, one day for a better future", "translation": "一步一个脚印，走向更美好的未来",
-             "startMs": 0, "endMs": 2000, "syllables": []],
+             "isAiTranslation": false, "startMs": 0, "endMs": 2000, "syllables": []],
             ["text": "All our colors 世界中に溢れ出す", "translation": "让所有色彩，向着全世界溢出",
-             "startMs": 2000, "endMs": 4500, "syllables": []],
+             "isAiTranslation": true, "startMs": 2000, "endMs": 4500, "syllables": []],
             ["text": "Together", "translation": "相聚在一起，共同将这纯白的画布装点成属于我们的绚烂未来；让每一种色彩和每一段旋律都能够完整地被看见，即使译文远远长于原来的这一句歌词，也应该平稳地沿着文字视口继续滚动",
-             "startMs": 4500, "endMs": 9000, "syllables": []]
+             "isAiTranslation": true, "startMs": 4500, "endMs": 9000, "syllables": []]
         ]
         visualMessage("track", [
             "id": "visual-test", "title": "Dream Rig", "artists": ["Crystal Statues"],
@@ -726,7 +740,7 @@ private final class AppController: NSObject, NSApplicationDelegate {
 
     private func captureVisualTestFrame() {
         guard visualTestStartedAt > 0,
-              let directory = ProcessInfo.processInfo.environment["LYRICIFY_GLASS_CAPTURE_DIR"] else { return }
+              let directory = ProcessInfo.processInfo.environment["KASHISHU_GLASS_CAPTURE_DIR"] else { return }
         let times = [0.6, 1.9, 2.02, 2.06, 2.10, 2.16, 2.24, 2.36, 2.7, 3.02, 3.12, 3.38, 3.8,
                      4.02, 4.18, 4.4, 5.02, 5.12, 5.4, 5.54, 5.64, 5.9, 6.6, 6.9, 7.3, 7.7]
         let elapsed = frameTime - visualTestStartedAt
@@ -884,7 +898,7 @@ private final class AppController: NSObject, NSApplicationDelegate {
 
     private var reduceMotion: Bool {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["LYRICIFY_GLASS_REDUCE_MOTION"] == "1" { return true }
+        if ProcessInfo.processInfo.environment["KASHISHU_GLASS_REDUCE_MOTION"] == "1" { return true }
         #endif
         return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
@@ -912,6 +926,9 @@ private final class AppController: NSObject, NSApplicationDelegate {
         if let track, track.durationMs > 0 {
             framePositionMs = min(framePositionMs, Double(track.durationMs))
         }
+        lyricRenderer.effects = IslandLyricEffects(
+            lift: settings.lyricsLift && !reduceMotion, wave: settings.lyricsLiftMode == "Wave",
+            glowIntensity: settings.glowIntensity)
         updateLyricContent(now, previousPosition: previousPosition)
         if IslandLyricPhase(
             elapsed: now - lineChangedAt,
@@ -979,6 +996,13 @@ private final class AppController: NSObject, NSApplicationDelegate {
         lineIndex = next
         lyricContent = nextContent
         lineChangedAt = now
+        if let track, next >= 0 {
+            let upcoming = track.lyrics.dropFirst(next + 1).prefix(2)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.lyricRenderer.prepare(upcoming, scale: self.settings.scale)
+            }
+        }
         switch nextContent {
         case let .line(line, _): island.setAccessibilityLabel(line.text)
         case let .status(title, subtitle): island.setAccessibilityLabel("\(title)，\(subtitle)")
@@ -1084,6 +1108,8 @@ private final class AppController: NSObject, NSApplicationDelegate {
             return playback.canNext && !playback.busy
         case .banner:
             return playback.trackId != nil
+        case .copyLink:
+            return playback.canCopyLink
         }
     }
 
@@ -1221,7 +1247,7 @@ private final class AppController: NSObject, NSApplicationDelegate {
         cancelPendingClick()
         menuTrackID = playback?.trackId
         defer { menuTrackID = nil }
-        let menu = NSMenu(title: "Lyricify Island")
+        let menu = NSMenu(title: "Kashishu")
         menu.autoenablesItems = false
         addItem(menu, "打开歌词窗口", #selector(openLyrics))
         menu.addItem(.separator())
@@ -1498,6 +1524,8 @@ private final class AppController: NSObject, NSApplicationDelegate {
             symbol = "forward.fill"
         case .banner:
             symbol = "photo"
+        case .copyLink:
+            symbol = "link"
         case .temporaryHide:
             symbol = "eye.slash"
         case .none:
@@ -1668,7 +1696,7 @@ private final class IslandView: NSView {
 }
 
 @main
-private struct LyricifyIslandGlassMain {
+private struct KashishuGlassMain {
     @MainActor
     static func main() {
         let app = NSApplication.shared

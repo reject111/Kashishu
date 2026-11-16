@@ -40,15 +40,12 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources/Headphones/*.json" LogicalName="Kashishu.Headphones.%(Filename)%(Extension)" />
-    <EmbeddedResource Include="Resources/MacMediaBridge.js" LogicalName="LyricifyIsland.MacMediaBridge.js" />
-    <EmbeddedResource Include="Resources/MacTrayIcon.png" LogicalName="LyricifyIsland.MacTrayIcon.png" />
+    <EmbeddedResource Include="Resources/MacMediaBridge.js" LogicalName="Kashishu.MacMediaBridge.js" />
+    <EmbeddedResource Include="Resources/MacTrayIcon.png" LogicalName="Kashishu.MacTrayIcon.png" />
     <EmbeddedResource Include="Resources/Icons/*.svg" LogicalName="Kashishu.Icons.%(Filename)%(Extension)" />
     <EmbeddedResource
       Include="Resources/Icons/kashishu.png"
       LogicalName="Kashishu.icon.png" />
-    <EmbeddedResource
-      Include="Resources/LyricifyIsland.icon.png"
-      LogicalName="LyricifyIsland.icon.png" />
   </ItemGroup>
 
   <!-- The .NET apphost currently declares an older linked SDK, which makes AppKit

@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>LyricifyIslandGlass</string>
+    <string>KashishuGlass</string>
     <key>CFBundleIdentifier</key>
-    <string>com.lyricifyisland.glass-visual-test</string>
+    <string>com.kashishu.glass-visual-test</string>
     <key>CFBundleName</key>
-    <string>Lyricify Glass Visual Test</string>
+    <string>Kashishu Glass Visual Test</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSUIElement</key>

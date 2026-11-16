@@ -28,7 +28,7 @@ Spotify 授权仍保存在 `${XDG_STATE_HOME:-$HOME/.local/state}/lyricify-islan
 
 ## Windows 安装
 
-Windows 10 1809 及以上或 Windows 11。从 [Releases](https://github.com/reject111/LyricifyIsland/releases)
+Windows 10 1809 及以上或 Windows 11。从 [Releases](https://github.com/reject111/Kashishu/releases)
 下载 `Kashishu-Setup-<版本>.exe` 安装：默认装到当前用户目录，无需管理员权限，可选桌面快捷方式。
 每次向 main 分支推送后，GitHub Actions 会自动构建并发布新的 Windows 安装包和 macOS DMG。
 从旧版升级时，首次启动会把 `%APPDATA%\lyricify-island`、`%LOCALAPPDATA%\lyricify-island`
@@ -56,13 +56,13 @@ Windows 10 1809 及以上或 Windows 11。从 [Releases](https://github.com/reje
 ## macOS 安装
 
 macOS 12 及以上，Apple Silicon 与 Intel 均可。GitHub Actions 会随 main 分支推送在
-[Releases](https://github.com/reject111/LyricifyIsland/releases) 发布未签名的
-`LyricifyIsland-<版本>-<架构>.dmg`，打开后把 `LyricifyIsland.app` 拖入“应用程序”即可。
+[Releases](https://github.com/reject111/Kashishu/releases) 发布未签名的
+`Kashishu-<版本>-<架构>.dmg`，打开后把 `Kashishu.app` 拖入“应用程序”即可。
 构建只有 ad-hoc 签名，未使用 Developer ID，也未公证，因此首次启动会被 Gatekeeper 拦截：
 请右键点击应用选择“打开”，或执行：
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/LyricifyIsland.app
+xattr -dr com.apple.quarantine /Applications/Kashishu.app
 ```
 
 也可以从源码构建，需要 [.NET 10 SDK](https://dotnet.microsoft.com/download) 和包含 macOS 26 或更新 SDK 的
@@ -73,10 +73,10 @@ Xcode / Command Line Tools（提供 `swiftc`、`xcrun`、`vtool`）：
 ./run-macos.sh
 ```
 
-构建产物是 `dist/LyricifyIsland.app` 和未签名的 `dist/LyricifyIsland-<版本>-<架构>.dmg`，前者可直接拖入
-“应用程序”目录后启动；`dist/LyricifyIsland` 指向包内可执行文件，
+构建产物是 `dist/Kashishu.app` 和未签名的 `dist/Kashishu-<版本>-<架构>.dmg`，前者可直接拖入
+“应用程序”目录后启动；`dist/Kashishu` 指向包内可执行文件，
 方便命令行使用。应用以菜单栏常驻程序运行（`LSUIElement`），不显示 Dock 图标。macOS 版使用原生透明置顶窗口、
-菜单栏托盘和系统级自动启动（LaunchAgents）：
+菜单栏托盘和用户级自动启动（LaunchAgents）：
 
 - “本地播放器”通过 AppleScript 读取 Spotify 与 Music 的当前曲目、播放位置、随机/循环和音量，并可播放/暂停、
   切歌、跳转、调节音量；Music 还支持收藏。首次使用会请求“自动化”权限，允许后即可读取和控制系统播放器。
@@ -94,8 +94,14 @@ Xcode / Command Line Tools（提供 `swiftc`、`xcrun`、`vtool`）：
   Spotify 和 Music；浏览器、VLC 等其他播放器不会出现在本地播放源中，可以改用 Spotify Web API。
   Music 的封面为尽力读取，取不到时显示占位图；Spotify 封面通过歌曲封面地址下载。
 
+从旧版升级后，macOS 首次启动会合并旧 `lyricify-island` 目录中的设置、Spotify 授权和缓存到
+`kashishu`，已有的新文件优先保留；登录启动项也会迁移到 `com.kashishu.app`。
+构建脚本会清理工作区内旧名称的应用包、DMG 和中间产物。菜单栏使用与应用排箫造型一致的单色模板图标，
+原生词岛支持歌词升降模式、泛光强度、AI 译文标识和复制歌曲链接；本地 Spotify 使用公开歌曲链接，
+Music 没有可用公开链接时禁用复制操作。
+
 如果首次读取播放信息时状态提示需要授权，请到“系统设置 → 隐私与安全性 → 自动化”中允许
-Lyricify Island 控制 Spotify 或 Music，然后重新切换播放信息源或重启应用。
+Kashishu 控制 Spotify 或 Music，然后重新切换播放信息源或重启应用。
 
 ## 首次运行
 
@@ -279,7 +285,7 @@ FreeClip、FreeArc 和眼镜不显示降噪选项；眼镜只显示左右镜腿�
 
 `--demo --exit-after 5` 可用于五秒启动冒烟检查。Windows 上把 `./run.sh` 换成
 `.\run-windows.ps1`（或 `.\dist\Kashishu.exe`），macOS 上换成 `./run-macos.sh`
-（或 `./dist/LyricifyIsland`），输出路径换成对应平台的路径即可。
+（或 `./dist/Kashishu`），输出路径换成对应平台的路径即可。
 
 Windows 构建完成后可运行 `./packaging/test-windows.ps1`：使用隔离的配置、状态与缓存目录，
 对最终单文件程序执行渲染与数据自检，并实际打开设置页，验证八个分区、开关同步、分享图页面切换、
@@ -311,7 +317,7 @@ Windows 构建完成后可运行 `./packaging/test-windows.ps1`：使用隔离�
 - 临时隐藏：可选 2、5、10 或 30 秒。
 - 登录后自动启动：Linux 写入当前用户的 XDG 自启动目录，Windows 写入当前用户的
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，macOS 写入当前用户的
-  `~/Library/LaunchAgents/com.lyricifyisland.app.plist`。
+  `~/Library/LaunchAgents/com.kashishu.app.plist`。
 - 播放信息源：可在 Spotify Web API 与本地播放器之间切换；Windows 上本地来源为系统媒体会话，
   macOS 上为 Spotify / Music。
 - Spotify Client ID 和 Client Secret：点击保存后重新连接，Secret 在界面中遮蔽显示。

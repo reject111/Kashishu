@@ -78,13 +78,15 @@ jobs:
           ./build-macos.sh
 
       - name: Self test
-        run: ./dist/LyricifyIsland --self-test
+        run: |
+          ./dist/Kashishu --self-test
+          bash packaging/test-macos-integration.sh dist/Kashishu.app
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LyricifyIsland-macOS-${{ env.VERSION }}-build.${{ github.run_number }}
-          path: dist/LyricifyIsland-*.dmg
+          name: Kashishu-macOS-${{ env.VERSION }}-build.${{ github.run_number }}
+          path: dist/Kashishu-*.dmg
           if-no-files-found: error
 
   publish:
@@ -119,13 +121,13 @@ jobs:
 
             - Windows 安装版：`Kashishu-Setup-${{ env.VERSION }}.exe`（当前用户目录，无需管理员权限）
             - Windows 便携版：`Kashishu.exe`（单个可执行文件，自带运行时）
-            - macOS：`LyricifyIsland-${{ env.VERSION }}-<架构>.dmg`（内含 `LyricifyIsland.app`）
+            - macOS：`Kashishu-${{ env.VERSION }}-<架构>.dmg`（内含 `Kashishu.app`）
 
             macOS 构建只有 ad-hoc 签名，未使用 Developer ID 签名，也未公证，因此首次打开会被 Gatekeeper 拦截。
-            请将 `LyricifyIsland.app` 拖入“应用程序”后右键选择“打开”，或执行：
+            请将 `Kashishu.app` 拖入“应用程序”后右键选择“打开”，或执行：
 
             ```bash
-            xattr -dr com.apple.quarantine /Applications/LyricifyIsland.app
+            xattr -dr com.apple.quarantine /Applications/Kashishu.app
             ```
 
             DMG 文件名中的架构对应构建机架构（GitHub 的 `macos-latest` 为 Apple Silicon）；
@@ -135,5 +137,5 @@ jobs:
           files: |
             dist/Kashishu-Setup-*.exe
             dist/Kashishu.exe
-            dist/LyricifyIsland-*.dmg
+            dist/Kashishu-*.dmg
           make_latest: true

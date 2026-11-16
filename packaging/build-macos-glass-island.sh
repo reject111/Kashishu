@@ -6,8 +6,8 @@ output_dir="${1:?output directory is required}"
 runtime_identifier="${2:-}"
 configuration="${3:-Debug}"
 source_file="$project_dir/native/macos/main.swift"
-output_file="$output_dir/LyricifyIslandGlass"
-module_cache="${TMPDIR:-/tmp}/lyricify-island-swift-module-cache"
+output_file="$output_dir/KashishuGlass"
+module_cache="${TMPDIR:-/tmp}/kashishu-swift-module-cache"
 
 case "$runtime_identifier" in
   osx-arm64) swift_arch=arm64 ;;

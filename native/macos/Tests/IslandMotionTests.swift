@@ -10,6 +10,7 @@ struct IslandMotionTests {
         testTransitionContinuity()
         testPauseRetention()
         testIconStates()
+        testGlyphLift()
         testScrollGate()
         testCapsuleHitTesting()
         print("native motion tests: ok")
@@ -110,6 +111,27 @@ struct IslandMotionTests {
         precondition(IslandIcon.playPause.isActive(playing: true, favorite: false))
         precondition(!IslandIcon.playPause.isActive(playing: false, favorite: true))
         precondition(!IslandIcon.lyricsWindow.isActive(playing: true, favorite: true))
+        precondition(IslandIcon(rawValue: "CopyLink") == .copyLink)
+    }
+
+    static func testGlyphLift() {
+        func lift(_ position: Double, wave: Bool) -> Double {
+            islandGlyphLift(position: position, start: 100, end: 500, syllableDuration: 400, wave: wave)
+        }
+        precondition(lift(100, wave: false) == 0 && lift(100, wave: true) == 0)
+        precondition(abs(lift(750, wave: false) - (1 - exp(-1))) < 0.000001,
+                     "Stay mode must match the reference renderer's 650 ms rise")
+        precondition(lift(500, wave: true) == 1 && lift(640, wave: true) == 1,
+                     "Wave mode must hold at the end of the sung syllable")
+        precondition(lift(1020, wave: true) == 0 && lift(2000, wave: true) == 0,
+                     "Wave mode must return exactly to the baseline")
+        var previous = 0.0
+        for position in 101...2000 {
+            let current = lift(Double(position), wave: true)
+            precondition(current >= 0 && current <= 1 && abs(current - previous) < 0.01,
+                         "Glyph lift must remain bounded and continuous")
+            previous = current
+        }
     }
 
     static func testScrollGate() {

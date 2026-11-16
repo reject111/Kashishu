@@ -12,6 +12,7 @@ case "$(uname -m)" in
 esac
 
 git -C "$project_dir" submodule update --init --recursive
+bash "$project_dir/packaging/clean-macos-legacy.sh"
 command -v dotnet >/dev/null || { echo 'dotnet SDK is required' >&2; exit 1; }
 
 dotnet publish "$project_dir/Kashishu.csproj" \
@@ -26,15 +27,15 @@ dotnet publish "$project_dir/Kashishu.csproj" \
 version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$project_dir/Kashishu.csproj" | head -1)"
 [[ -n "$version" ]] || { echo 'Version missing from Kashishu.csproj' >&2; exit 1; }
 
-app="$project_dir/dist/LyricifyIsland.app"
+app="$project_dir/dist/Kashishu.app"
 rm -rf -- "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Helpers"
-install -m755 "$publish_dir/Kashishu" "$app/Contents/MacOS/LyricifyIsland"
-[[ -x "$publish_dir/LyricifyIslandGlass" ]] || {
+install -m755 "$publish_dir/Kashishu" "$app/Contents/MacOS/Kashishu"
+[[ -x "$publish_dir/KashishuGlass" ]] || {
   echo 'Native Liquid Glass island helper was not built' >&2
   exit 1
 }
-install -m755 "$publish_dir/LyricifyIslandGlass" "$app/Contents/Helpers/LyricifyIslandGlass"
+install -m755 "$publish_dir/KashishuGlass" "$app/Contents/Helpers/KashishuGlass"
 
 # The bundle is an accessory app (LSUIElement): it lives in the menu bar and does not add a
 # Dock icon, matching the tray-only behaviour of the Linux and Windows builds.
@@ -46,17 +47,17 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleDisplayName</key>
-    <string>Lyricify Island</string>
+    <string>Kashishu</string>
     <key>CFBundleExecutable</key>
-    <string>LyricifyIsland</string>
+    <string>Kashishu</string>
     <key>CFBundleIdentifier</key>
-    <string>com.lyricifyisland.app</string>
+    <string>com.kashishu.app</string>
     <key>CFBundleIconFile</key>
-    <string>LyricifyIsland</string>
+    <string>Kashishu</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Lyricify Island</string>
+    <string>Kashishu</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -76,34 +77,36 @@ cat > "$app/Contents/Info.plist" <<PLIST
 PLIST
 
 # Build the .icns from the icon embedded in the app; iconutil needs the full iconset.
-icon="$project_dir/vendor/Lyricify-Lyrics-Helper/Lyricify.Lyrics.Helper/Resources/icon.png"
+icon="$project_dir/Resources/Icons/kashishu.png"
 if [[ -f "$icon" ]] && command -v sips >/dev/null && command -v iconutil >/dev/null; then
-  iconset="$publish_dir/LyricifyIsland.iconset"
+  iconset="$publish_dir/Kashishu.iconset"
   mkdir -p "$iconset"
   for size in 16 32 128 256 512; do
     sips -z "$size" "$size" "$icon" --out "$iconset/icon_${size}x${size}.png" >/dev/null
     sips -z "$((size * 2))" "$((size * 2))" "$icon" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
   done
-  iconutil -c icns "$iconset" -o "$app/Contents/Resources/LyricifyIsland.icns" >/dev/null
+  iconutil -c icns "$iconset" -o "$app/Contents/Resources/Kashishu.icns" >/dev/null
 fi
 
 license_dir="$app/Contents/Resources/licenses"
 mkdir -p "$license_dir" "$project_dir/dist/licenses"
 install -m644 "$project_dir/THIRD_PARTY_NOTICES.md" "$app/Contents/Resources/THIRD_PARTY_NOTICES.md"
-install -m644 "$project_dir/LICENSE" "$license_dir/LyricifyIsland-Apache-2.0.txt"
-install -m644 "$project_dir/licenses/OppoPodsManager-GPL-3.0.txt" "$license_dir/OppoPodsManager-GPL-3.0.txt"
+install -m644 "$project_dir/LICENSE" "$license_dir/Kashishu-Apache-2.0.txt"
+for license in "$project_dir"/licenses/*.txt; do
+  install -m644 "$license" "$license_dir/$(basename "$license")"
+done
 install -m644 "$project_dir/vendor/Lyricify-Lyrics-Helper/LICENSE" "$license_dir/Lyricify-Lyrics-Helper-Apache-2.0.txt"
 install -m644 "$app/Contents/Resources/THIRD_PARTY_NOTICES.md" "$project_dir/dist/THIRD_PARTY_NOTICES.md"
 ditto "$license_dir" "$project_dir/dist/licenses"
 
 # Ad-hoc signing keeps the app's identity stable enough for the Automation permission prompt.
 if command -v codesign >/dev/null; then
-  codesign --force --sign - "$app/Contents/Helpers/LyricifyIslandGlass" >/dev/null
+  codesign --force --sign - "$app/Contents/Helpers/KashishuGlass" >/dev/null
   codesign --force --deep --sign - "$app" >/dev/null
   codesign --verify --deep --strict "$app"
 fi
 
-ln -sfn "LyricifyIsland.app/Contents/MacOS/LyricifyIsland" "$project_dir/dist/LyricifyIsland"
+ln -sfn "Kashishu.app/Contents/MacOS/Kashishu" "$project_dir/dist/Kashishu"
 
 # The DMG is unsigned/not notarized like the app bundle; it exists so the CI release and
 # local builds hand out the same drag-and-drop installer. The Applications link lets the
@@ -111,11 +114,11 @@ ln -sfn "LyricifyIsland.app/Contents/MacOS/LyricifyIsland" "$project_dir/dist/Ly
 if command -v hdiutil >/dev/null; then
   stage="$publish_dir/dmg"
   mkdir -p "$stage"
-  ditto "$app" "$stage/LyricifyIsland.app"
+  ditto "$app" "$stage/Kashishu.app"
   ln -sfn /Applications "$stage/Applications"
-  dmg="$project_dir/dist/LyricifyIsland-${version}-$(uname -m).dmg"
+  dmg="$project_dir/dist/Kashishu-${version}-$(uname -m).dmg"
   rm -f -- "$dmg"
-  hdiutil create -quiet -volname "Lyricify Island" -srcfolder "$stage" -ov -format UDZO "$dmg"
+  hdiutil create -quiet -volname "Kashishu" -srcfolder "$stage" -ov -format UDZO "$dmg"
   printf 'Built %s\n' "$dmg"
 fi
 printf 'Built %s\n' "$app"

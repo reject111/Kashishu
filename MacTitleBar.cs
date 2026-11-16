@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using Avalonia.Controls;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>
 /// Embeds AppKit's title bar in the cover-derived header. The standard buttons remain
@@ -20,7 +20,7 @@ internal static class MacTitleBar
         // A unified toolbar lets AppKit choose the traffic-light metrics for this OS.
         // No custom button views, frame offsets or private titlebar subviews are needed.
         var identifier = SendString(GetClass("NSString"), Selector("stringWithUTF8String:"),
-            "com.lyricifyisland.lyrics-toolbar");
+            "com.kashishu.lyrics-toolbar");
         var toolbar = SendPointer(Send(GetClass("NSToolbar"), Selector("alloc")),
             Selector("initWithIdentifier:"), identifier);
         try

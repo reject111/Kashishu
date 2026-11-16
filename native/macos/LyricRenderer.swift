@@ -1,5 +1,12 @@
 import AppKit
 import CoreImage
+import CoreText
+
+struct IslandLyricEffects {
+    var lift = true
+    var wave = false
+    var glowIntensity = 4
+}
 
 enum IslandLyricContent: Equatable {
     case line(GlassLine, translation: Bool)
@@ -13,12 +20,30 @@ struct IslandLyricBitmap {
 }
 
 final class IslandLyricRenderer {
+    var effects = IslandLyricEffects()
+
+    private struct Glyph {
+        let path: CGPath?
+        let font: CTFont
+        let id: CGGlyph
+        let position: CGPoint
+        let start: Double
+        let end: Double
+        let syllableDuration: Double
+    }
+    private struct LayoutKey: Hashable {
+        let line: GlassLine
+        let font: NSFont
+    }
+    private var layouts: [LayoutKey: [Glyph]] = [:]
     private struct TextMetricKey: Hashable {
         let text: String
         let font: NSFont
     }
 
-    private let imageContext = CIContext(options: [.cacheIntermediates: false])
+    // These are small, short-lived text bitmaps. Software filtering avoids Metal shader
+    // compilation and GPU readback stalls on the first frames of a lyric transition.
+    private let imageContext = CIContext(options: [.cacheIntermediates: false, .useSoftwareRenderer: true])
     private var textMetrics: [TextMetricKey: NSSize] = [:]
 
     init() {
@@ -37,12 +62,20 @@ final class IslandLyricRenderer {
         }
     }
 
+    func prepare(_ lines: ArraySlice<GlassLine>, scale: CGFloat) {
+        for line in lines {
+            _ = size(line.text, font: mainFont(scale))
+            _ = translationSize(line.translation ?? "", ai: line.isAiTranslation, scale: scale)
+            _ = glyphs(line, font: mainFont(scale))
+        }
+    }
+
     func measure(_ content: IslandLyricContent, scale: CGFloat) -> NSSize {
         switch content {
         case let .line(line, showTranslation):
             let main = size(line.text, font: mainFont(scale))
             let translation = showTranslation ? (line.translation ?? "") : ""
-            let sub = size(translation, font: subFont(scale))
+            let sub = translationSize(translation, ai: line.isAiTranslation, scale: scale)
             return NSSize(
                 width: max(main.width, sub.width),
                 height: translation.isEmpty ? 64 * scale : 84 * scale)
@@ -175,7 +208,7 @@ final class IslandLyricRenderer {
         let subFont = subFont(scale)
         let translation = showTranslation ? (line.translation ?? "").trimmingCharacters(in: .whitespacesAndNewlines) : ""
         let mainSize = size(line.text, font: mainFont)
-        let subSize = size(translation, font: subFont)
+        let subSize = translationSize(translation, ai: line.isAiTranslation, scale: scale)
         let gap = 5 * scale
         let totalHeight = mainSize.height + (translation.isEmpty ? 0 : gap + subSize.height)
         let top = viewport.midY - totalHeight / 2
@@ -185,19 +218,8 @@ final class IslandLyricRenderer {
         let mainX = overflow > 0 ? viewport.minX - scroll : viewport.midX - mainSize.width / 2
         let highContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         let idleAlpha: CGFloat = highContrast ? 0.78 : 0.58
-        (line.text as NSString).draw(
-            at: NSPoint(x: mainX, y: top),
-            withAttributes: [.font: mainFont, .foregroundColor: NSColor.labelColor.withAlphaComponent(idleAlpha)])
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: NSRect(
-            x: mainX,
-            y: viewport.minY,
-            width: max(0, activeWidth),
-            height: viewport.height)).addClip()
-        (line.text as NSString).draw(
-            at: NSPoint(x: mainX, y: top),
-            withAttributes: [.font: mainFont, .foregroundColor: NSColor.labelColor])
-        NSGraphicsContext.restoreGraphicsState()
+        drawKaraoke(line, font: mainFont, at: NSPoint(x: mainX, y: top + mainFont.ascender),
+                    activeWidth: activeWidth, positionMs: positionMs, scale: scale, idleAlpha: idleAlpha)
         let translationOverflow = max(0, subSize.width - viewport.width)
         let duration = Double(max(1, line.endMs - line.startMs))
         let progress = min(max((positionMs - Double(line.startMs) - 300) / max(1, duration - 600), 0), 1)
@@ -211,9 +233,144 @@ final class IslandLyricRenderer {
                     .font: subFont,
                     .foregroundColor: NSColor.secondaryLabelColor
                 ])
+            if line.isAiTranslation {
+                let badge = NSRect(x: translationX + size(translation, font: subFont).width + 6 * scale,
+                                   y: top + mainSize.height + gap + 2 * scale,
+                                   width: 24 * scale, height: 16 * scale)
+                NSColor.labelColor.withAlphaComponent(0.10).setFill()
+                NSBezierPath(roundedRect: badge, xRadius: 4 * scale, yRadius: 4 * scale).fill()
+                drawBadgeLabel(in: badge, scale: scale)
+            }
         }
         if overflow > 0 || translationOverflow > 0 {
             fadeEdges(in: viewport, width: 12 * scale)
+        }
+    }
+
+    private func translationSize(_ text: String, ai: Bool, scale: CGFloat) -> NSSize {
+        var result = size(text, font: subFont(scale))
+        if !text.isEmpty && ai { result.width += 30 * scale }
+        return result
+    }
+
+    private func drawBadgeLabel(in rect: NSRect, scale: CGFloat) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let label = CTLineCreateWithAttributedString(NSAttributedString(string: "AI", attributes: [
+            .font: NSFont.systemFont(ofSize: 10 * scale, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]))
+        let ink = CTLineGetBoundsWithOptions(label, .useGlyphPathBounds)
+        context.saveGState()
+        context.translateBy(x: rect.midX, y: rect.midY)
+        context.scaleBy(x: 1, y: -1)
+        context.textMatrix = .identity
+        context.textPosition = CGPoint(x: -ink.midX, y: -ink.midY)
+        CTLineDraw(label, context)
+        context.restoreGState()
+    }
+
+    private func glyphs(_ line: GlassLine, font: NSFont) -> [Glyph] {
+        let key = LayoutKey(line: line, font: font)
+        if let cached = layouts[key] { return cached }
+        let shaped = CTLineCreateWithAttributedString(NSAttributedString(string: line.text, attributes: [.font: font]))
+        let text = line.text as NSString
+        var timings: [(range: NSRange, start: Double, end: Double, duration: Double)] = []
+        var offset = 0
+        let syllables = line.syllables.isEmpty
+            ? [GlassSyllable(text: line.text, startMs: line.startMs, endMs: line.endMs)] : line.syllables
+        for syllable in syllables {
+            let count = (syllable.text as NSString).length
+            let duration = Double(max(1, syllable.endMs - syllable.startMs))
+            timings.append((NSRange(location: offset, length: count), Double(syllable.startMs),
+                            Double(syllable.endMs), duration))
+            offset += count
+        }
+        var result: [Glyph] = []
+        for run in CTLineGetGlyphRuns(shaped) as! [CTRun] {
+            let count = CTRunGetGlyphCount(run)
+            var ids = [CGGlyph](repeating: 0, count: count)
+            var positions = [CGPoint](repeating: .zero, count: count)
+            var indices = [CFIndex](repeating: 0, count: count)
+            CTRunGetGlyphs(run, CFRange(), &ids)
+            CTRunGetPositions(run, CFRange(), &positions)
+            CTRunGetStringIndices(run, CFRange(), &indices)
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            let runFont = attributes[kCTFontAttributeName] as! CTFont
+            for index in 0..<count {
+                let path = CTFontCreatePathForGlyph(runFont, ids[index], nil)
+                let location = indices[index]
+                guard location >= 0, location < text.length else { continue }
+                let cluster = text.rangeOfComposedCharacterSequence(at: location)
+                let timing = timings.first { NSLocationInRange(location, $0.range) }
+                let duration = timing?.duration ?? Double(max(1, line.endMs - line.startMs))
+                let range = timing?.range ?? NSRange(location: 0, length: text.length)
+                let start = (timing?.start ?? Double(line.startMs))
+                    + duration * Double(max(0, cluster.location - range.location)) / Double(max(1, range.length))
+                let end = min(timing?.end ?? Double(line.endMs),
+                              start + duration * Double(cluster.length) / Double(max(1, range.length)))
+                result.append(Glyph(path: path, font: runFont, id: ids[index], position: positions[index], start: start, end: end,
+                                    syllableDuration: duration))
+            }
+        }
+        if layouts.count >= 64 { layouts.removeAll(keepingCapacity: true) }
+        layouts[key] = result
+        return result
+    }
+
+    private func drawKaraoke(_ line: GlassLine, font: NSFont, at origin: NSPoint, activeWidth: CGFloat,
+                             positionMs: Double, scale: CGFloat, idleAlpha: CGFloat) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let glow: CGFloat = [0.25, 0.5, 0.75, 1, 1.35][min(max(effects.glowIntensity, 1), 5) - 1]
+        let bleed = 12 * (0.4 + 0.6 * glow) * scale
+        let entry = min(max(activeWidth / (10 * scale), 0), 1)
+        let ramp = entry * entry * (3 - 2 * entry)
+        let width = size(line.text, font: font).width
+        let remaining = min(max((width - activeWidth) / (12 * scale), 0), 1)
+        let trail = activeWidth - 12 * scale * remaining
+        let lead = activeWidth + bleed * ramp
+        let label = NSColor.labelColor.usingColorSpace(.deviceRGB) ?? .white
+        // A single continuous gradient avoids a brightness step when the sweep clears a glyph.
+        let colors = (0...6).map { index -> CGColor in
+            let t = CGFloat(index) / 6
+            let smooth = t * t * t * (t * (t * 6 - 15) + 10)
+            return label.withAlphaComponent((1 - smooth) * ramp).cgColor
+        }
+        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray,
+                                  locations: (0...6).map { CGFloat($0) / 6 })!
+        for glyph in glyphs(line, font: font) {
+            let lift = effects.lift ? islandGlyphLift(position: positionMs, start: glyph.start, end: glyph.end,
+                                                     syllableDuration: glyph.syllableDuration, wave: effects.wave) : 0
+            context.saveGState()
+            context.translateBy(x: origin.x + glyph.position.x, y: origin.y - glyph.position.y - 4 * scale * lift)
+            context.scaleBy(x: 1, y: -1)
+            guard let path = glyph.path else {
+                // Color glyphs (for example emoji) have no outline. CoreText draws them intact.
+                var id = glyph.id
+                var point = CGPoint.zero
+                CTFontDrawGlyphs(glyph.font, &id, &point, 1, context)
+                context.restoreGState()
+                continue
+            }
+            context.addPath(path)
+            context.setFillColor(label.withAlphaComponent(idleAlpha).cgColor)
+            context.fillPath()
+            let lit = min(max((lead - glyph.position.x) / max(1, path.boundingBoxOfPath.width + bleed), 0), 1)
+            if lit > 0 {
+                context.saveGState()
+                context.setShadow(offset: .zero, blur: 4 * scale,
+                                  color: label.withAlphaComponent(0.32 * glow * lit * ramp).cgColor)
+                context.setFillColor(label.withAlphaComponent(0.10 * glow * lit * ramp).cgColor)
+                context.addPath(path)
+                context.fillPath()
+                context.restoreGState()
+                context.addPath(path)
+                context.clip()
+                context.drawLinearGradient(gradient,
+                    start: CGPoint(x: trail - glyph.position.x, y: 0),
+                    end: CGPoint(x: max(trail + 0.01, lead) - glyph.position.x, y: 0),
+                    options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+            }
+            context.restoreGState()
         }
     }
 
@@ -255,7 +412,7 @@ final class IslandLyricRenderer {
         guard positionMs > Double(line.startMs) else { return 0 }
         if line.syllables.isEmpty {
             let progress = min(max((positionMs - Double(line.startMs)) / Double(max(1, line.endMs - line.startMs)), 0), 1)
-            return size(line.text, font: font).width * CGFloat(progress)
+            return size(line.text, font: font).width * CGFloat(progress * progress * (3 - 2 * progress))
         }
         var prefix = ""
         for syllable in line.syllables {
@@ -264,7 +421,8 @@ final class IslandLyricRenderer {
             if positionMs < Double(syllable.endMs) {
                 let progress = min(max(
                     (positionMs - Double(syllable.startMs)) / Double(max(1, syllable.endMs - syllable.startMs)), 0), 1)
-                return prefixWidth + (size(prefix + syllable.text, font: font).width - prefixWidth) * CGFloat(progress)
+                let sweep = 0.65 * progress + 0.35 * progress * progress * (3 - 2 * progress)
+                return prefixWidth + (size(prefix + syllable.text, font: font).width - prefixWidth) * CGFloat(sweep)
             }
             prefix += syllable.text
         }

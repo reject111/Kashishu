@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 
-namespace LyricifyIsland;
+namespace Kashishu;
 
 /// <summary>
 /// Local playback source on macOS. macOS has no public MPRIS counterpart and the private
@@ -179,6 +179,7 @@ internal sealed class MacMediaService : IPlaybackSource
                 track = track with { AlbumArtBytes = player.ArtworkBytes };
             if (player.ArtworkUrl is { Length: > 0 } artworkUrl)
                 track = track with { AlbumArtUrl = artworkUrl };
+            track = track with { ShareUrl = ShareUrl(player) };
             Volatile.Write(ref _track, track);
             Volatile.Write(ref _loadingTrack, track);
             _store.Update(Snapshot(player, track, positionMs, reportedAt));
@@ -264,7 +265,7 @@ internal sealed class MacMediaService : IPlaybackSource
                 {
                     var error = String(document.RootElement, "error");
                     return error is not null && IsAuthorizationError(error)
-                        ? "需要允许 Lyricify Island 控制 Spotify 或 Music"
+                        ? "需要允许 Kashishu 控制 Spotify 或 Music"
                         : "当前播放器不支持此操作";
                 }
             }
@@ -312,6 +313,17 @@ internal sealed class MacMediaService : IPlaybackSource
         string? ArtworkUrl,
         ImmutableArray<byte> ArtworkBytes,
         PlaybackControls Controls);
+
+    internal static string? ShareUrl(Player player)
+    {
+        // Music's persistent/database IDs are local library identities, not public links.
+        const string prefix = "spotify:track:";
+        if (player.Source == "spotify" && player.TrackId is { } id
+            && id.StartsWith(prefix, StringComparison.Ordinal)
+            && id[prefix.Length..] is { Length: 22 } value && value.All(char.IsAsciiLetterOrDigit))
+            return $"https://open.spotify.com/track/{value}";
+        return null;
+    }
 
     internal static Player? ParsePlayer(JsonElement element)
     {
@@ -532,7 +544,7 @@ internal sealed class MacMediaService : IPlaybackSource
     private static string LoadBridgeScript()
     {
         using var stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream("LyricifyIsland.MacMediaBridge.js")
+            .GetManifestResourceStream("Kashishu.MacMediaBridge.js")
             ?? throw new InvalidOperationException("Embedded macOS media bridge is missing");
         using var reader = new StreamReader(stream, Encoding.UTF8);
         return reader.ReadToEnd();
